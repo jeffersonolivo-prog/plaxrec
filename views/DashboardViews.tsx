@@ -34,15 +34,15 @@ export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ 
                 <button onClick={() => setCurrency('BRL')} className={`flex-1 py-1 rounded text-sm font-medium ${currency === 'BRL' ? 'bg-plax-100 text-plax-700 border border-plax-200' : 'bg-gray-50 text-gray-500'}`}>R$ (Bancário)</button>
                 <button onClick={() => setCurrency('PLAX')} className={`flex-1 py-1 rounded text-sm font-medium ${currency === 'PLAX' ? 'bg-plax-100 text-plax-700 border border-plax-200' : 'bg-gray-50 text-gray-500'}`}>PLAX (Conversão)</button>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
                 <input 
                     type="number" 
-                    className="flex-1 border rounded-lg px-4 py-2" 
+                    className="flex-1 border rounded-lg px-4 py-2 w-full" 
                     placeholder={`Qtd ${currency}`}
                     value={amount}
                     onChange={e => setAmount(e.target.value)}
                 />
-                <button onClick={handleWithdraw} className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 font-medium">
+                <button onClick={handleWithdraw} className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 font-medium w-full sm:w-auto">
                     Sacar
                 </button>
             </div>
@@ -82,21 +82,21 @@ export const CollectorView: React.FC<ViewProps> = ({ user, refresh }) => {
           <table className="w-full text-sm text-left text-gray-500">
             <thead className="text-xs text-gray-700 uppercase bg-gray-50">
               <tr>
-                <th className="px-6 py-3">Data</th>
-                <th className="px-6 py-3">Descrição</th>
-                <th className="px-6 py-3">Valor</th>
-                <th className="px-6 py-3">Status</th>
+                <th className="px-6 py-3 whitespace-nowrap">Data</th>
+                <th className="px-6 py-3 whitespace-nowrap">Descrição</th>
+                <th className="px-6 py-3 whitespace-nowrap">Valor</th>
+                <th className="px-6 py-3 whitespace-nowrap">Status</th>
               </tr>
             </thead>
             <tbody>
               {transactions.map(t => (
                 <tr key={t.id} className="bg-white border-b hover:bg-gray-50">
-                  <td className="px-6 py-4">{new Date(t.date).toLocaleDateString()}</td>
-                  <td className="px-6 py-4 font-medium text-gray-900">{t.description}</td>
-                  <td className="px-6 py-4 text-plax-600 font-bold">
+                  <td className="px-6 py-4 whitespace-nowrap">{new Date(t.date).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{t.description}</td>
+                  <td className="px-6 py-4 text-plax-600 font-bold whitespace-nowrap">
                       {t.amountPlax ? `+${t.amountPlax} PLAX` : `R$ ${t.amountBRL?.toFixed(2)}`}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-4 whitespace-nowrap">
                     <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
                       {t.status}
                     </span>
@@ -237,29 +237,31 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
              <h3 className="font-bold text-gray-700 flex items-center"><Package className="mr-2"/> Estoque Aguardando NFe</h3>
              <span className="text-xs text-gray-500">Lotes recebidos mas não processados contabilmente</span>
           </div>
-          <table className="w-full text-sm text-left text-gray-500">
-              <thead className="bg-gray-50 uppercase text-xs">
-                  <tr>
-                      <th className="px-6 py-3">ID Lote</th>
-                      <th className="px-6 py-3">Peso</th>
-                      <th className="px-6 py-3">Tipo</th>
-                      <th className="px-6 py-3">Status</th>
-                  </tr>
-              </thead>
-              <tbody>
-                  {pendingBatches.map(b => (
-                      <tr key={b.id} className="border-b">
-                          <td className="px-6 py-4">{b.id}</td>
-                          <td className="px-6 py-4 font-bold">{b.weightKg} kg</td>
-                          <td className="px-6 py-4">{b.plasticType}</td>
-                          <td className="px-6 py-4"><span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">Aguardando NFe</span></td>
-                      </tr>
-                  ))}
-                  {pendingBatches.length === 0 && (
-                      <tr><td colSpan={4} className="p-4 text-center text-gray-400">Nenhum lote pendente. Registre uma nova coleta.</td></tr>
-                  )}
-              </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left text-gray-500">
+                <thead className="bg-gray-50 uppercase text-xs">
+                    <tr>
+                        <th className="px-6 py-3 whitespace-nowrap">ID Lote</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Peso</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Tipo</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {pendingBatches.map(b => (
+                        <tr key={b.id} className="border-b">
+                            <td className="px-6 py-4 whitespace-nowrap">{b.id}</td>
+                            <td className="px-6 py-4 font-bold whitespace-nowrap">{b.weightKg} kg</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{b.plasticType}</td>
+                            <td className="px-6 py-4 whitespace-nowrap"><span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">Aguardando NFe</span></td>
+                        </tr>
+                    ))}
+                    {pendingBatches.length === 0 && (
+                        <tr><td colSpan={4} className="p-4 text-center text-gray-400">Nenhum lote pendente. Registre uma nova coleta.</td></tr>
+                    )}
+                </tbody>
+            </table>
+          </div>
       </div>
     </div>
   );
@@ -405,7 +407,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
             </div>
             
             <div className="bg-green-50 p-6 rounded-xl border border-green-100 flex flex-col md:flex-row items-center gap-6">
-                    <div className="flex-1">
+                    <div className="flex-1 w-full">
                         <label className="block text-sm font-bold text-green-900 mb-2">Valor do Investimento (R$)</label>
                         <div className="flex">
                             <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-green-300 bg-green-100 text-gray-500 text-sm">R$</span>
@@ -421,7 +423,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
                             Estimativa: {Number(purchaseAmount) > 0 ? (Number(purchaseAmount) / ESG_CREDIT_PRICE_PER_KG).toFixed(1) : 0} kg de créditos.
                         </p>
                     </div>
-                    <button onClick={handlePurchase} className="bg-green-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-green-700 shadow-md transition-transform active:scale-95">
+                    <button onClick={handlePurchase} className="w-full md:w-auto bg-green-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-green-700 shadow-md transition-transform active:scale-95">
                         Comprar Créditos
                     </button>
             </div>
@@ -474,21 +476,21 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
                <table className="w-full text-sm text-left text-gray-500">
                    <thead className="bg-gray-50 uppercase text-xs">
                        <tr>
-                           <th className="px-6 py-3">ID Lote</th>
-                           <th className="px-6 py-3">Data</th>
-                           <th className="px-6 py-3">NFe Origem</th>
-                           <th className="px-6 py-3">Peso</th>
-                           <th className="px-6 py-3">Ação</th>
+                           <th className="px-6 py-3 whitespace-nowrap">ID Lote</th>
+                           <th className="px-6 py-3 whitespace-nowrap">Data</th>
+                           <th className="px-6 py-3 whitespace-nowrap">NFe Origem</th>
+                           <th className="px-6 py-3 whitespace-nowrap">Peso</th>
+                           <th className="px-6 py-3 whitespace-nowrap">Ação</th>
                        </tr>
                    </thead>
                    <tbody>
                        {myCertificates.map(batch => (
                            <tr key={batch.id} className="border-b hover:bg-gray-50">
-                               <td className="px-6 py-4 font-mono">{batch.id}</td>
-                               <td className="px-6 py-4">{new Date(batch.certificationDate!).toLocaleDateString()}</td>
-                               <td className="px-6 py-4 font-mono text-xs">{batch.nfeId}</td>
-                               <td className="px-6 py-4 font-bold">{batch.weightKg.toFixed(2)} kg</td>
-                               <td className="px-6 py-4">
+                               <td className="px-6 py-4 font-mono whitespace-nowrap">{batch.id}</td>
+                               <td className="px-6 py-4 whitespace-nowrap">{new Date(batch.certificationDate!).toLocaleDateString()}</td>
+                               <td className="px-6 py-4 font-mono text-xs whitespace-nowrap">{batch.nfeId}</td>
+                               <td className="px-6 py-4 font-bold whitespace-nowrap">{batch.weightKg.toFixed(2)} kg</td>
+                               <td className="px-6 py-4 whitespace-nowrap">
                                    <button onClick={() => generatePDF(batch)} className="text-plax-600 hover:text-plax-800 font-medium flex items-center bg-plax-50 px-3 py-1 rounded border border-plax-200">
                                        <Printer size={16} className="mr-2"/> Imprimir Certificado
                                    </button>
@@ -550,19 +552,19 @@ export const AdminView: React.FC<ViewProps> = ({ user, refresh }) => {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-gray-50 uppercase text-gray-500">
                                 <tr>
-                                    <th className="p-3">Nome</th>
-                                    <th className="p-3">Função</th>
-                                    <th className="p-3">Saldo Plax</th>
-                                    <th className="p-3">Saldo R$</th>
+                                    <th className="p-3 whitespace-nowrap">Nome</th>
+                                    <th className="p-3 whitespace-nowrap">Função</th>
+                                    <th className="p-3 whitespace-nowrap">Saldo Plax</th>
+                                    <th className="p-3 whitespace-nowrap">Saldo R$</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {plaxService.getUsers().map(u => (
                                     <tr key={u.id} className="border-b">
-                                        <td className="p-3 font-medium">{u.name}</td>
-                                        <td className="p-3"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-bold">{u.role}</span></td>
-                                        <td className="p-3">{u.balancePlax.toFixed(2)}</td>
-                                        <td className="p-3">R$ {u.balanceBRL.toFixed(2)}</td>
+                                        <td className="p-3 font-medium whitespace-nowrap">{u.name}</td>
+                                        <td className="p-3 whitespace-nowrap"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-bold">{u.role}</span></td>
+                                        <td className="p-3 whitespace-nowrap">{u.balancePlax.toFixed(2)}</td>
+                                        <td className="p-3 whitespace-nowrap">R$ {u.balanceBRL.toFixed(2)}</td>
                                     </tr>
                                 ))}
                             </tbody>
