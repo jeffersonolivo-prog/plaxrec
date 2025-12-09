@@ -9,7 +9,6 @@ export const INSTITUTIONS = [
 ];
 
 class PlaxService {
-  // Alterado para FALSE para forçar o uso do Supabase real
   private demoMode = false;
   
   // Helper to check configuration
@@ -17,7 +16,6 @@ class PlaxService {
       const url = SUPABASE_URL;
       const key = SUPABASE_ANON_KEY;
 
-      // Se as chaves ainda forem os placeholders ou estiverem vazias, forçamos o erro ou demo
       if (!url || url.includes('COLE_SUA') || !key || key.includes('COLE_SUA')) {
           return "Supabase não configurado. Edite o arquivo services/supabaseClient.ts com suas chaves reais.";
       }
@@ -30,27 +28,84 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) { 
         console.error(configError); 
-        // Se não tiver config, retorna null para forçar logout ou erro
         return null; 
     }
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    
-    if (error || !data) return null;
+    try {
+        // 1. Tenta buscar o perfil existente no banco de dados
+        const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+        
+        // Se encontrou, retorna o usuário normalmente
+        if (data && !error) {
+            return {
+                id: data.id,
+                name: data.name,
+                email: data.email,
+                role: data.role as UserRole,
+                balancePlax: data.balance_plax || 0,
+                balanceBRL: data.balance_brl || 0,
+                lockedPlax: data.locked_plax || 0
+            };
+        }
 
-    return {
-        id: data.id,
-        name: data.name,
-        email: data.email,
-        role: data.role as UserRole,
-        balancePlax: data.balance_plax,
-        balanceBRL: data.balance_brl,
-        lockedPlax: data.locked_plax
-    };
+        // 2. Se não encontrou o perfil (Erro comum: Trigger não rodou ou tabela não existe),
+        // Vamos tentar reconstruir o usuário a partir dos dados da Sessão de Auth.
+        // Isso impede o "loop de login" onde o usuário autentica mas não entra.
+        
+        const { data: authData } = await supabase.auth.getUser();
+        const authUser = authData.user;
+
+        // Se o ID da sessão bater com o ID solicitado
+        if (authUser && authUser.id === userId) {
+            console.warn("Perfil não encontrado no DB. Tentando criar perfil temporário/automático.");
+            
+            const meta = authUser.user_metadata || {};
+            // Tenta pegar o nome do metadata, ou do email, ou usa um padrão
+            const fallbackName = meta.name || authUser.email?.split('@')[0] || 'Usuário PlaxRec';
+            // Tenta pegar a role do metadata (google login salva lá), ou usa padrão
+            const fallbackRole = (meta.role as UserRole) || UserRole.COLLECTOR;
+
+            const newProfileData = {
+                id: userId,
+                name: fallbackName,
+                email: authUser.email || '',
+                role: fallbackRole,
+                balance_plax: 0,
+                balance_brl: 0,
+                locked_plax: 0
+            };
+
+            // 3. Tenta inserir esse perfil no banco para consertar para a próxima vez (Self-Healing)
+            // Se a tabela 'profiles' não existir, isso vai falhar, mas o 'catch' abaixo garante o login.
+            const { error: insertError } = await supabase.from('profiles').insert(newProfileData);
+            
+            if (insertError) {
+                console.error("Falha ao criar perfil no DB (possivelmente tabela inexistente). Usando perfil em memória.", insertError);
+            }
+
+            // 4. Retorna o objeto de usuário mesmo se a inserção no banco falhou.
+            // Isso garante que o usuário ENTRE no sistema.
+            return {
+                id: newProfileData.id,
+                name: newProfileData.name,
+                email: newProfileData.email,
+                role: newProfileData.role,
+                balancePlax: 0,
+                balanceBRL: 0,
+                lockedPlax: 0
+            };
+        }
+
+        return null;
+
+    } catch (e) {
+        console.error("Erro crítico ao obter usuário:", e);
+        return null;
+    }
   }
   
   async login(email: string, password: string): Promise<{ user: User | null, error?: string }> {
@@ -63,9 +118,15 @@ class PlaxService {
     });
 
     if (authError) return { user: null, error: authError.message };
-    if (!authData.user) return { user: null, error: 'Erro desconhecido' };
+    if (!authData.user) return { user: null, error: 'Erro desconhecido na autenticação.' };
 
-    return { user: await this.getCurrentUser(authData.user.id) };
+    const user = await this.getCurrentUser(authData.user.id);
+    if (!user) {
+        // Se cair aqui, é porque falhou TUDO (DB e Recuperação de Auth)
+        return { user: null, error: 'Falha ao carregar perfil do usuário.' };
+    }
+
+    return { user };
   }
 
   async loginWithGoogle(rolePreference?: UserRole): Promise<{ error?: string }> {
@@ -79,7 +140,12 @@ class PlaxService {
     const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: window.location.origin // Isso enviará para https://plaxrec.vercel.app
+            redirectTo: window.location.origin,
+            queryParams: {
+                // Passa o role como metadata para ajudar na criação automática se necessário
+                access_type: 'offline',
+                prompt: 'consent'
+            }
         }
     });
 
@@ -94,21 +160,37 @@ class PlaxService {
         email,
         password,
         options: {
+            // Salva nome e role nos metadados do Auth para recuperação futura
             data: { name, role }
         }
     });
 
     if (authError) return { user: null, error: authError.message };
-    if (!authData.user) return { user: null, error: 'Erro ao criar usuário. Verifique seu e-mail para confirmar.' };
+    
+    // Se o usuário foi criado, mas a sessão é nula (aguardando confirmação de email),
+    // retornamos null aqui para que o AuthView mostre a mensagem correta, ou tratamos no AuthView.
+    // Mas para manter compatibilidade com o AuthView atual:
+    if (authData.user && !authData.session) {
+         // O AuthView vai receber este usuário mas sem sessão ativa.
+         // O ideal é avisar o usuário para verificar o email.
+         return { user: null, error: 'Conta criada! Verifique seu e-mail para confirmar o cadastro antes de entrar.' };
+    }
 
-    // Retorna um objeto de usuário básico, pois o trigger do Supabase criará o profile assincronamente
+    if (!authData.user) return { user: null, error: 'Erro ao criar usuário.' };
+
+    // Retorna um objeto de usuário básico
     return { user: { id: authData.user.id, name, email, role, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
   }
 
   async updateProfileRole(userId: string, role: UserRole) {
       const configError = this.checkConfig();
       if (configError) return;
+      
+      // Tenta atualizar no perfil
       await supabase.from('profiles').update({ role: role }).eq('id', userId);
+      
+      // Tenta atualizar no metadata do Auth também para consistência
+      await supabase.auth.updateUser({ data: { role: role } });
   }
 
   async logout() {
