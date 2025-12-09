@@ -8,6 +8,32 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publi
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /**
+<<<<<<< HEAD
+ * --- SEGURANÇA GITHUB ---
+ * 
+ * As credenciais (Client ID e Secret) foram removidas deste arquivo porque
+ * o GitHub bloqueia o envio de código contendo chaves secretas reais (Secret Scanning).
+ * 
+ * Se você já colou as chaves no Painel do Supabase (Authentication -> Providers -> Google),
+ * seu login funcionará normalmente.
+ * 
+ * Se você perdeu a chave secreta, precisará gerar uma nova credencial no Google Cloud Console.
+ * 
+ * --- COMO FINALIZAR A CONFIGURAÇÃO ---
+ * 
+ * 1. Vá no Painel do Supabase -> Authentication -> Providers -> Google.
+ * 2. Ative a opção "Enable Sign in with Google".
+ * 3. Cole o ID do cliente e a Chave secreta nos campos correspondentes.
+ * 4. Clique em "Save".
+ * 
+ * Se o login falhar, verifique se a URL de Callback está correta no Google Cloud:
+ * https://eclxjggicyfqjpgeytjk.supabase.co/auth/v1/callback
+ * 
+ * ---------------------------------------------------------
+ * 
+ * DATABASE SCHEMA (SQL):
+ * Execute no SQL Editor do Supabase se ainda não criou as tabelas:
+=======
  * --- INSTRUÇÕES IMPORTANTES DE CONFIGURAÇÃO ---
  * 
  * 1. EMAIL CONFIRMATION:
@@ -17,6 +43,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
  * 2. DATABASE SCHEMA:
  * 
  * Copie o código SQL abaixo e execute no SQL Editor do Supabase para criar as tabelas necessárias:
+>>>>>>> parent of 0917341 (Revisão-5)
  * 
  * -- 1. Tabelas
  * create extension if not exists "uuid-ossp";
