@@ -47,11 +47,27 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
       handleUrlErrors();
   }, []);
 
+  const withTimeout = async (promise: Promise<any>, ms: number = 10000) => {
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error("O tempo limite da requisição expirou. Verifique sua conexão.")), ms);
+      });
+      try {
+          const result = await Promise.race([promise, timeoutPromise]);
+          clearTimeout(timeoutId);
+          return result;
+      } catch (e) {
+          clearTimeout(timeoutId);
+          throw e;
+      }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-        const { user, error } = await plaxService.login(loginEmail, loginPass);
+        // Envolve o login em um timeout de 10s para garantir que o spinner pare
+        const { user, error } = await withTimeout(plaxService.login(loginEmail, loginPass));
         
         if (user) {
           onLogin(user);
@@ -75,8 +91,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
       } catch (err: any) {
           handleAuthError(err.message);
       } finally {
-          // Nota: Google login redireciona a página, então o loading false pode não ser visível se der sucesso, 
-          // mas é importante caso falhe antes do redirect.
+          // Google login redireciona, mas se falhar antes, para o spinner
           setLoading(false);
       }
   };
@@ -87,7 +102,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     
     setLoading(true);
     try {
-        const { user, error } = await plaxService.register(regName, regEmail, regPass);
+        const { user, error } = await withTimeout(plaxService.register(regName, regEmail, regPass));
         
         if (user) {
           onLogin(user);
@@ -111,7 +126,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           alert('⚠️ AÇÃO NECESSÁRIA NO SUPABASE ⚠️\n\nErro: Email não confirmado.\n\nSolução: Vá no painel do Supabase -> Authentication -> Providers -> Email -> Desmarque "Confirm email".');
       } else if (error.includes('Invalid login credentials')) {
           alert('Email ou senha incorretos.');
-      } else if (error.includes('fetch')) {
+      } else if (error.includes('fetch') || error.includes('network')) {
           alert('Erro de conexão. Verifique sua internet ou a configuração do Supabase.');
       } else {
           alert(`Erro: ${error}`);

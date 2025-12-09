@@ -24,72 +24,88 @@ class PlaxService {
   async getCurrentUser(authUserId: string): Promise<User | null> {
     if (!authUserId) return null;
     const configError = this.checkConfig();
+    // Se não tiver config, não trava, retorna null e a UI avisa
     if (configError) { console.error(configError); return null; }
 
     try {
-        // 1. Busca o perfil real no banco
-        const { data, error } = await supabase
+        // 1. Tenta buscar dados do Supabase Auth (Fonte da verdade da Sessão)
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        
+        // Se o token expirou ou não há usuário, retorna null
+        if (authError || !authData.user || authData.user.id !== authUserId) {
+            return null;
+        }
+
+        // 2. Tenta buscar o perfil no banco de dados (Fonte da verdade dos Dados)
+        const { data: profile, error: dbError } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', authUserId)
             .single();
-        
-        // Se encontrou, retorna o usuário formatado
-        if (data && !error) {
+
+        // CENÁRIO IDEAL: Perfil existe no banco
+        if (profile && !dbError) {
             return {
-                id: data.id,
-                name: data.name,
-                email: data.email,
-                role: (data.role as UserRole), 
-                balancePlax: data.balance_plax || 0,
-                balanceBRL: data.balance_brl || 0,
-                lockedPlax: data.locked_plax || 0,
-                avatarUrl: data.avatar_url || ''
+                id: profile.id,
+                name: profile.name,
+                email: profile.email,
+                role: (profile.role as UserRole) || UserRole.GUEST, 
+                balancePlax: profile.balance_plax || 0,
+                balanceBRL: profile.balance_brl || 0,
+                lockedPlax: profile.locked_plax || 0,
+                avatarUrl: profile.avatar_url || ''
             };
         }
 
-        // Se deu erro e não é "No rows found" (código PGRST116), loga o erro real
-        if (error && error.code !== 'PGRST116') {
-            console.error("Erro ao buscar perfil (possível bloqueio RLS):", error);
-        }
+        // CENÁRIO DE FALLBACK (Primeiro Login ou Erro no Banco):
+        // Se chegamos aqui, o usuário está AUTENTICADO, mas não tem perfil no banco.
+        // Vamos criar um objeto de usuário baseado no Auth para não travar o login.
+        
+        const fallbackUser: User = {
+            id: authUserId,
+            name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'Usuário',
+            email: authData.user.email || '',
+            role: UserRole.GUEST, // Assume GUEST até conseguir salvar no banco
+            balancePlax: 0,
+            balanceBRL: 0,
+            lockedPlax: 0
+        };
 
-        // 2. Se não encontrou perfil (ex: primeiro login), tenta criar com UPSERT
-        const { data: authData } = await supabase.auth.getUser();
-        if (authData.user && authData.user.id === authUserId) {
-             const newProfileData = {
-                id: authUserId,
-                name: authData.user.user_metadata?.name || 'Novo Usuário',
-                email: authData.user.email || '',
-                role: UserRole.GUEST,
-                balance_plax: 0,
-                balance_brl: 0,
-                locked_plax: 0,
-            };
-            
-            // Usa UPSERT em vez de INSERT para evitar erro de "Duplicate Key" se o trigger do banco já tiver criado
-            const { error: upsertError } = await supabase.from('profiles').upsert(newProfileData);
-            
-            if (upsertError) {
-                console.error("Erro ao garantir perfil:", upsertError);
-                // Mesmo com erro, tentamos retornar o objeto para a UI, assumindo que o login auth funcionou
-                // Isso evita o 'loop' de login
-            }
+        // Tenta salvar/criar o perfil em "Background" (sem await para não travar a UI se o banco estiver lento/erro)
+        this.ensureProfileExists(fallbackUser);
 
-            return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
-        }
-
-        return null;
+        return fallbackUser;
 
     } catch (e) {
-        console.error("Erro crítico ao obter usuário:", e);
+        console.error("Erro crítico no getCurrentUser:", e);
         return null;
     }
+  }
+
+  // Método auxiliar para tentar salvar sem bloquear o fluxo principal
+  private async ensureProfileExists(user: User) {
+      try {
+          const dbProfile = {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+              balance_plax: 0,
+              balance_brl: 0,
+              locked_plax: 0
+          };
+          // Upsert ignora conflitos se já existir
+          await supabase.from('profiles').upsert(dbProfile);
+      } catch (err) {
+          console.warn("Falha silenciosa ao salvar perfil (pode ser erro de permissão RLS):", err);
+      }
   }
   
   async login(email: string, password: string): Promise<{ user: User | null, error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
 
+    // 1. Autenticação Pura
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password
@@ -98,9 +114,11 @@ class PlaxService {
     if (authError) return { user: null, error: authError.message };
     if (!authData.user) return { user: null, error: 'Erro desconhecido na autenticação.' };
 
+    // 2. Recuperação de Perfil (Com fallback robusto implementado acima)
     const user = await this.getCurrentUser(authData.user.id);
-    // Se getCurrentUser falhar silenciosamente, retorna erro explícito
-    if (!user) return { user: null, error: 'Falha ao recuperar dados do perfil. Tente novamente.' };
+    
+    // Se mesmo com fallback retornar null, algo muito grave aconteceu (ex: auth token inválido instantaneamente)
+    if (!user) return { user: null, error: 'Não foi possível carregar os dados do usuário. Tente recarregar a página.' };
     
     return { user };
   }
@@ -120,27 +138,37 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
     
+    // 1. Cria usuário no Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email, password, options: { data: { name } } 
     });
 
     if (authError) return { user: null, error: authError.message };
-    if (authData.user && !authData.session) return { user: null, error: 'Verifique seu e-mail para confirmar o cadastro.' };
     
-    // Força a criação do perfil na tabela profiles para garantir que existe
+    // Verifica confirmação de email
+    if (authData.user && !authData.session) {
+        return { user: null, error: 'Cadastro realizado! Verifique seu e-mail para confirmar antes de entrar.' };
+    }
+    
+    // 2. Se logou direto (sem email confirmation), retorna o usuário IMEDIATAMENTE
     if (authData.user) {
-        await supabase.from('profiles').upsert({
+        const newUser: User = {
             id: authData.user.id,
             name: name,
             email: email,
             role: UserRole.GUEST,
-            balance_plax: 0,
-            balance_brl: 0,
-            locked_plax: 0
-        });
+            balancePlax: 0,
+            balanceBRL: 0,
+            lockedPlax: 0
+        };
+
+        // Dispara a criação no banco mas NÃO espera ela terminar para retornar o sucesso para a UI
+        this.ensureProfileExists(newUser);
+
+        return { user: newUser };
     }
 
-    return { user: { id: authData.user!.id, name, email, role: UserRole.GUEST, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
+    return { user: null, error: "Erro desconhecido no registro." };
   }
 
   async updateProfileRole(userId: string, role: UserRole) {
@@ -148,10 +176,26 @@ class PlaxService {
       if (configError) return { success: false, message: configError };
       try {
           const { error } = await supabase.from('profiles').update({ role: role }).eq('id', userId);
-          if (error) throw error;
+          
+          if (error) {
+              // Se deu erro no update, pode ser que o perfil não exista. Tenta criar.
+              const { data: authUser } = await supabase.auth.getUser();
+              if (authUser?.user) {
+                   const { error: upsertError } = await supabase.from('profiles').upsert({
+                       id: userId,
+                       role: role,
+                       email: authUser.user.email,
+                       name: authUser.user.user_metadata?.name || 'User',
+                   });
+                   if (upsertError) throw upsertError;
+                   return { success: true };
+              }
+              throw error;
+          }
           return { success: true };
       } catch (e: any) {
-          return { success: false, message: e.message || 'Erro ao atualizar papel.' };
+          console.error(e);
+          return { success: false, message: 'Erro de conexão ou permissão. Tente novamente.' };
       }
   }
 
