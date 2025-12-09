@@ -492,12 +492,30 @@ class PlaxService {
       
       if (isPlax) {
           if (user.balancePlax < amount) return { success: false, message: 'Saldo Plax insuficiente' };
-          const brlValue = (amount * PLAX_TO_BRL_RATE) * 0.98; // 2% fee
+          
+          const conversionRate = PLAX_TO_BRL_RATE;
+          const grossBrl = amount * conversionRate;
+          const fee = grossBrl * 0.02; // 2% fee
+          const netBrl = grossBrl - fee;
+
           await this.updateBalance(userId, 'balance_plax', -amount);
-          await this.updateBalance(userId, 'balance_brl', brlValue);
+          await this.updateBalance(userId, 'balance_brl', netBrl);
+          
+          // Transfer Fee to Admin
+          await this.distributeToRole(UserRole.ADMIN, fee);
+
       } else {
+          // BRL Withdrawal
           if (user.balanceBRL < amount) return { success: false, message: 'Saldo R$ insuficiente' };
+          
+          const fee = amount * 0.02; // 2% fee on withdrawal
+          const netWithdrawal = amount - fee; // User gets less in bank, or user pays fee on top? Usually deducted from requested amount or balance.
+          // Let's assume the 'amount' is what they want to take out from their balance.
+          
           await this.updateBalance(userId, 'balance_brl', -amount);
+          
+          // Transfer Fee to Admin
+          await this.distributeToRole(UserRole.ADMIN, fee);
       }
       
       await supabase.from('transactions').insert({

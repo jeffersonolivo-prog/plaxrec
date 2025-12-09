@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, PlasticType, Transaction, CollectionBatch, ESG_CREDIT_PRICE_PER_KG } from '../types';
 import { plaxService, INSTITUTIONS } from '../services/mockState';
-import { ArrowUpRight, ArrowDownLeft, Scale, Truck, ShoppingBag, Landmark, Activity, FileCheck, DollarSign, Download, Leaf, Package, Heart, Printer, Loader2, Wallet } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Scale, Truck, ShoppingBag, Landmark, Activity, FileCheck, DollarSign, Download, Leaf, Package, Heart, Printer, Loader2, Wallet, ShieldCheck, Recycle } from 'lucide-react';
 
 interface ViewProps {
   user: User;
@@ -9,7 +9,7 @@ interface ViewProps {
 }
 
 // --- REUSABLE COMPONENT: WITHDRAWAL ---
-export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ user, refresh }) => {
+export const WithdrawalCard: React.FC<{ user: User; refresh: () => void; title?: string }> = ({ user, refresh, title }) => {
     const [amount, setAmount] = useState('');
     const [currency, setCurrency] = useState<'PLAX' | 'BRL'>('BRL');
     const [loading, setLoading] = useState(false);
@@ -31,7 +31,7 @@ export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ 
 
     return (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <h3 className="text-gray-700 font-bold mb-4 flex items-center"><DollarSign size={18} className="mr-2" /> Realizar Saque / Conversão</h3>
+            <h3 className="text-gray-700 font-bold mb-4 flex items-center"><DollarSign size={18} className="mr-2" /> {title || 'Realizar Saque / Conversão'}</h3>
             <div className="flex space-x-2 mb-4">
                 <button onClick={() => setCurrency('BRL')} className={`flex-1 py-1 rounded text-sm font-medium ${currency === 'BRL' ? 'bg-plax-100 text-plax-700 border border-plax-200' : 'bg-gray-50 text-gray-500'}`}>R$ (Bancário)</button>
                 <button onClick={() => setCurrency('PLAX')} className={`flex-1 py-1 rounded text-sm font-medium ${currency === 'PLAX' ? 'bg-plax-100 text-plax-700 border border-plax-200' : 'bg-gray-50 text-gray-500'}`}>PLAX (Conversão)</button>
@@ -49,7 +49,7 @@ export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ 
                 </button>
             </div>
             <p className="text-xs text-gray-400 mt-2">
-                Disponível: {currency === 'PLAX' ? `${user.balancePlax} PLAX` : `R$ ${user.balanceBRL.toFixed(2)}`} <br/>
+                Disponível na sua conta: {currency === 'PLAX' ? `${user.balancePlax.toFixed(2)} PLAX` : `R$ ${user.balanceBRL.toFixed(2)}`} <br/>
                 Taxa de Adm: 2%
             </p>
         </div>
@@ -65,15 +65,18 @@ export const CollectorView: React.FC<ViewProps> = ({ user, refresh }) => {
   }, [user.id, user.balanceBRL]); // Refresh when balance changes likely implies transaction
   
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in slide-in-from-bottom-5 duration-500">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-gradient-to-br from-plax-500 to-plax-700 rounded-2xl p-6 text-white shadow-lg">
+        <div className="bg-gradient-to-br from-plax-500 to-plax-700 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+           <div className="absolute right-0 top-0 opacity-10 p-4 transform translate-x-4 -translate-y-4">
+               <Recycle size={120} />
+           </div>
            <h3 className="text-plax-100 font-medium mb-1">Seu Saldo Plax</h3>
-           <div className="text-4xl font-bold mb-4">{user.balancePlax} PLAX</div>
+           <div className="text-4xl font-bold mb-4">{user.balancePlax.toFixed(2)} <span className="text-xl font-normal">PLAX</span></div>
            <div className="flex items-center text-plax-100 text-sm bg-white/10 p-2 rounded w-fit">
               <span className="mr-2">≈</span> R$ {(user.balancePlax * 0.5).toFixed(2)}
            </div>
-           <p className="mt-4 text-xs text-plax-100 bg-white/10 p-2 rounded">
+           <p className="mt-4 text-xs text-plax-100 bg-white/10 p-2 rounded relative z-10">
               Receba 15% de bônus em dinheiro sempre que seus lotes forem certificados por empresas ESG.
            </p>
         </div>
@@ -109,6 +112,9 @@ export const CollectorView: React.FC<ViewProps> = ({ user, refresh }) => {
                   </td>
                 </tr>
               ))}
+              {transactions.length === 0 && (
+                  <tr><td colSpan={4} className="p-6 text-center text-gray-400">Nenhuma coleta realizada ainda.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -144,7 +150,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
           setPendingBatches(batches.filter(b => b.recyclerId === user.id));
       };
       load();
-  }, [user.id, user.balancePlax]); // Reload when balance updates (implies action taken)
+  }, [user.id, user.balancePlax]); 
 
   const totalPendingWeight = pendingBatches.reduce((acc, b) => acc + b.weightKg, 0);
 
@@ -174,7 +180,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in slide-in-from-bottom-5 duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Register Collection */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 col-span-1">
@@ -248,7 +254,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
                 <h3 className="text-gray-400 text-sm uppercase font-bold mb-4">Carteira Empresarial</h3>
                 <div className="mb-4">
                     <p className="text-sm text-gray-400">Plax Ativo</p>
-                    <p className="text-3xl font-bold text-plax-400">{user.balancePlax}</p>
+                    <p className="text-3xl font-bold text-plax-400">{user.balancePlax.toFixed(2)}</p>
                 </div>
                 <div>
                     <p className="text-sm text-gray-400">Disponível em R$</p>
@@ -303,7 +309,7 @@ export const TransformerView: React.FC<ViewProps> = ({ user, refresh }) => {
     }, [user.id, user.balancePlax]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-in slide-in-from-bottom-5 duration-500">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                  <div className="md:col-span-2 space-y-6">
                     <div className="bg-white p-8 rounded-xl shadow-sm border border-l-4 border-l-blue-500">
@@ -328,8 +334,8 @@ export const TransformerView: React.FC<ViewProps> = ({ user, refresh }) => {
                  </div>
                  <div className="space-y-4">
                      <div className="bg-gray-900 text-white p-6 rounded-xl">
-                        <h3 className="text-gray-400 text-sm uppercase font-bold mb-4">Caixa</h3>
-                        <p className="text-3xl font-bold text-plax-400 mb-2">{user.balancePlax} PLAX</p>
+                        <h3 className="text-gray-400 text-sm uppercase font-bold mb-4">Caixa da Indústria</h3>
+                        <p className="text-3xl font-bold text-plax-400 mb-2">{user.balancePlax.toFixed(2)} PLAX</p>
                         <p className="text-xl">R$ {user.balanceBRL.toFixed(2)}</p>
                      </div>
                      <WithdrawalCard user={user} refresh={refresh} />
@@ -343,7 +349,7 @@ export const TransformerView: React.FC<ViewProps> = ({ user, refresh }) => {
 export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
   const [purchaseAmount, setPurchaseAmount] = useState('');
   const [donateAmount, setDonateAmount] = useState('');
-  const [depositAmount, setDepositAmount] = useState(''); // Estado para o depósito
+  const [depositAmount, setDepositAmount] = useState(''); 
   const [selectedInst, setSelectedInst] = useState(INSTITUTIONS[0].id);
   const [availableWeight, setAvailableWeight] = useState(0);
   const [myCertificates, setMyCertificates] = useState<CollectionBatch[]>([]);
@@ -453,7 +459,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in slide-in-from-bottom-5 duration-500">
         
         {/* NEW: Deposit Section */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6">
@@ -612,18 +618,22 @@ export const AdminView: React.FC<ViewProps> = ({ user, refresh }) => {
     }, [user.balanceBRL]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-in slide-in-from-bottom-5 duration-500">
             <div className="bg-gray-800 text-white p-8 rounded-xl shadow-lg relative overflow-hidden">
                 <div className="relative z-10">
-                    <h2 className="text-3xl font-bold mb-2">Painel Administrativo</h2>
+                    <div className="flex items-center space-x-2 mb-2">
+                        <ShieldCheck className="text-emerald-400" />
+                        <h2 className="text-3xl font-bold">Painel Administrativo</h2>
+                    </div>
                     <p className="text-gray-300 mb-6">Gestão de taxas e reinvestimento da plataforma PlaxRec.</p>
                     <div className="grid grid-cols-2 gap-8 max-w-md">
                         <div>
-                            <p className="text-sm text-gray-400">Caixa da Plataforma (R$)</p>
+                            <p className="text-sm text-gray-400 uppercase font-bold">Fundo de Taxas & Reinvestimento</p>
                             <p className="text-3xl font-bold text-emerald-400">R$ {user.balanceBRL.toLocaleString()}</p>
+                            <p className="text-xs text-gray-500 mt-1">*Não inclui saldos de terceiros</p>
                         </div>
                         <div>
-                            <p className="text-sm text-gray-400">Taxa de Operação</p>
+                            <p className="text-sm text-gray-400 uppercase font-bold">Taxa de Operação</p>
                             <p className="text-3xl font-bold text-white">2%</p>
                         </div>
                     </div>
@@ -639,7 +649,7 @@ export const AdminView: React.FC<ViewProps> = ({ user, refresh }) => {
                             O Administrador pode sacar até 30% do acumulado para custos operacionais. 
                             O restante deve ser usado para reinvestimento na plataforma.
                         </p>
-                        <WithdrawalCard user={user} refresh={refresh} />
+                        <WithdrawalCard user={user} refresh={refresh} title="Sacar do Fundo de Taxas" />
                     </div>
                 </div>
 
@@ -657,8 +667,10 @@ export const AdminView: React.FC<ViewProps> = ({ user, refresh }) => {
                             </thead>
                             <tbody>
                                 {users.map(u => (
-                                    <tr key={u.id} className="border-b">
-                                        <td className="p-3 font-medium whitespace-nowrap">{u.name}</td>
+                                    <tr key={u.id} className="border-b hover:bg-gray-50">
+                                        <td className="p-3 font-medium whitespace-nowrap">
+                                            {u.name} {u.id === user.id ? '(Você)' : ''}
+                                        </td>
                                         <td className="p-3 whitespace-nowrap"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-bold">{u.role}</span></td>
                                         <td className="p-3 whitespace-nowrap">{u.balancePlax.toFixed(2)}</td>
                                         <td className="p-3 whitespace-nowrap">R$ {u.balanceBRL.toFixed(2)}</td>
