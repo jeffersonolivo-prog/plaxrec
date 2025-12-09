@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
 import { Recycle, UserPlus, LogIn, Loader2 } from 'lucide-react';
@@ -19,6 +19,33 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPass, setRegPass] = useState('');
+
+  // Verifica se houve erro no redirecionamento do Google (URL params)
+  useEffect(() => {
+      const handleUrlErrors = () => {
+          const params = new URLSearchParams(window.location.search);
+          const hashParams = new URLSearchParams(window.location.hash.substring(1)); // Remove #
+
+          const errorDesc = params.get('error_description') || hashParams.get('error_description');
+          const errorCode = params.get('error_code') || hashParams.get('error_code');
+
+          if (errorDesc) {
+              const decodedError = decodeURIComponent(errorDesc).replace(/\+/g, ' ');
+              console.error("OAuth Error:", decodedError);
+              
+              if (decodedError.includes('Unable to exchange external code')) {
+                  alert('ERRO DE CONFIGURAÇÃO GOOGLE/SUPABASE:\n\nO "Client Secret" no painel do Supabase está incorreto ou expirou.\n\nSolução:\n1. Vá no Google Cloud Console > Credentials > Reset Secret.\n2. Copie o novo Secret.\n3. Cole no Supabase > Auth > Providers > Google.');
+              } else {
+                  handleAuthError(decodedError);
+              }
+
+              // Limpa a URL para não ficar mostrando o erro se o usuário der F5
+              window.history.replaceState({}, document.title, window.location.pathname);
+          }
+      };
+
+      handleUrlErrors();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
