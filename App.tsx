@@ -17,36 +17,48 @@ const App: React.FC = () => {
   const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
-    // 1. Check active session on load (handles OAuth redirect)
+    let mounted = true;
+    
+    // Fail-safe: Se a sessão não carregar em 6 segundos, libera a tela
+    const safetyTimeout = setTimeout(() => {
+        if (mounted && checkingSession) {
+            console.warn("Timeout de sessão atingido. Liberando UI.");
+            setCheckingSession(false);
+        }
+    }, 6000);
+
     const initSession = async () => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             
             if (session?.user) {
                 let user = await plaxService.getCurrentUser(session.user.id);
-                if (user) {
+                if (user && mounted) {
                     setCurrentUser(user);
                 }
             }
         } catch (error) {
             console.error("Erro ao inicializar sessão:", error);
         } finally {
-            setCheckingSession(false);
+            if (mounted) setCheckingSession(false);
         }
     };
     initSession();
 
-    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
              const user = await plaxService.getCurrentUser(session.user.id);
-             if (user) setCurrentUser(user);
+             if (user && mounted) setCurrentUser(user);
         } else if (event === 'SIGNED_OUT') {
-            setCurrentUser(null);
+            if (mounted) setCurrentUser(null);
         }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+        mounted = false;
+        clearTimeout(safetyTimeout);
+        subscription.unsubscribe();
+    };
   }, []);
 
   const handleRefresh = async () => {

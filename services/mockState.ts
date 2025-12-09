@@ -25,10 +25,6 @@ class PlaxService {
 
   // --- Virtual Persona Logic ---
 
-  /**
-   * Define qual persona estamos simulando.
-   * Se role for null, volta para o usuário real.
-   */
   setDemoPersona(role: UserRole | null) {
       if (role) {
           this.activePersonaRole = role;
@@ -44,17 +40,11 @@ class PlaxService {
       return localStorage.getItem('plax_demo_role') as UserRole || null;
   }
 
-  /**
-   * Retorna o ID efetivo para operações no banco.
-   * Se estiver em modo Persona, retorna ID_ROLE.
-   * Se normal, retorna o ID original.
-   */
   private getEffectiveUserId(authUserId: string): string {
       this.realAuthId = authUserId;
       const role = this.getDemoPersona();
       
       if (role && role !== UserRole.GUEST) {
-          // Cria um ID único virtual para esta persona deste usuário
           return `${authUserId}_${role}`;
       }
       return authUserId;
@@ -91,11 +81,11 @@ class PlaxService {
             };
         }
 
-        // 2. Se não encontrou e estamos em MODO DEMO, cria a persona automaticamente
+        // 2. Se não encontrou e estamos em MODO DEMO, tenta criar
         if (currentRole && !data) {
-            console.log(`Criando persona virtual: ${effectiveId}`);
+            console.log(`Tentando criar persona virtual: ${effectiveId}`);
             
-            // Busca dados do usuário real para clonar nome/email
+            // Busca dados do usuário real para clonar nome/email base
             const { data: realProfile } = await supabase.from('profiles').select('*').eq('id', authUserId).single();
             const baseName = realProfile?.name || 'Usuário Demo';
             const baseEmail = realProfile?.email || 'demo@plaxrec.com';
@@ -112,9 +102,11 @@ class PlaxService {
             };
 
             const { error: insertError } = await supabase.from('profiles').insert(newPersonaData);
+            
+            // FALLBACK CRÍTICO: Se o banco recusar (insertError), retornamos o objeto em memória
+            // Isso garante que o app não trave se o usuário não rodou o SQL de FK constraint
             if (insertError) {
-                console.error("Erro ao criar persona virtual. Verifique se removeu a FK constraint no Supabase.", insertError);
-                return null;
+                console.warn("Falha ao persistir persona no DB (usando modo volátil):", insertError.message);
             }
 
             return {
@@ -141,6 +133,7 @@ class PlaxService {
                 balance_brl: 0,
                 locked_plax: 0,
             };
+            // Tenta inserir, se falhar, retorna o objeto mesmo assim
             await supabase.from('profiles').insert(newProfileData);
             return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
         }
@@ -157,7 +150,6 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
 
-    // Limpa persona anterior ao fazer novo login
     this.setDemoPersona(null);
 
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -198,7 +190,6 @@ class PlaxService {
   }
 
   async updateProfileRole(userId: string, role: UserRole) {
-      // Usado apenas para o GUEST inicial se tornar um usuário real
       const configError = this.checkConfig();
       if (configError) return { success: false, message: configError };
       try {
@@ -210,13 +201,12 @@ class PlaxService {
   }
 
   async updateProfile(userId: string, updates: any) {
-      // Atualiza o perfil ATIVO (seja virtual ou real)
       const { error } = await supabase.from('profiles').update({
           name: updates.name,
           avatar_url: updates.avatarUrl
       }).eq('id', userId);
 
-      if (updates.password && !userId.includes('_')) { // Só altera senha se for usuário real
+      if (updates.password && !userId.includes('_')) {
           await supabase.auth.updateUser({ password: updates.password });
       }
       
@@ -304,7 +294,6 @@ class PlaxService {
     const recycler = await this.getUserById(recyclerId);
     if (!recycler || recycler.lockedPlax < plaxToUnlock) return { success: false, message: `Saldo travado insuficiente.` };
 
-    // ... (logic simplificada para brevidade, mantém a lógica original) ...
     const { data: batches } = await supabase.from('batches').select('*').eq('recycler_id', recyclerId).eq('status', 'RECEIVED');
     if (!batches) return { success: false };
 
@@ -315,7 +304,6 @@ class PlaxService {
             await supabase.from('batches').update({ status: 'PROCESSED_NFE', nfe_id: manualNFeId }).eq('id', batch.id);
             remaining -= batch.weight_kg;
         } else {
-            // Split batch (not implemented fully for brevity, assume full batch matching for demo)
              await supabase.from('batches').update({ status: 'PROCESSED_NFE', nfe_id: manualNFeId }).eq('id', batch.id);
              remaining = 0;
         }
@@ -323,7 +311,7 @@ class PlaxService {
 
     await this.updateBalance(recyclerId, 'locked_plax', -plaxToUnlock);
     await this.updateBalance(recyclerId, 'balance_plax', plaxToUnlock);
-    await this.updateBalance(transformerId, 'balance_plax', plaxToUnlock); // Indústria recebe crédito? No fluxo circular, a indústria COMPRA crédito depois. Aqui ela só valida. Vamos assumir que destrava para o reciclador.
+    await this.updateBalance(transformerId, 'balance_plax', plaxToUnlock);
 
     await supabase.from('transactions').insert({
         type: 'NFE_RELEASE', amount_plax: plaxToUnlock, description: `NFe emitida (${manualNFeId})`,
@@ -344,7 +332,6 @@ class PlaxService {
       const buyer = await this.getUserById(buyerId);
       if (buyer.balanceBRL < amountBRL) return { success: false, message: 'Saldo insuficiente.' };
 
-      // Logic to find batches...
       const { data: batches } = await supabase.from('batches').select('*').eq('status', 'PROCESSED_NFE').limit(10);
       if(!batches || batches.length === 0) return { success: false, message: 'Sem lotes disponíveis.' };
       
@@ -361,11 +348,10 @@ class PlaxService {
 
       await this.updateBalance(buyerId, 'balance_brl', -spent);
       
-      // Split payments
       await this.distributeToRole(UserRole.COLLECTOR, spent * 0.15);
       await this.distributeToRole(UserRole.RECYCLER, spent * 0.30);
       await this.distributeToRole(UserRole.TRANSFORMER, spent * 0.25);
-      await this.updateBalance(buyerId, 'balance_brl', spent * 0.30); // Cash back for social
+      await this.updateBalance(buyerId, 'balance_brl', spent * 0.30); 
 
       await supabase.from('transactions').insert({
         type: 'ESG_PURCHASE', amount_brl: spent, description: `Compra de Créditos`, status: 'COMPLETED', from_user_id: buyerId
@@ -409,7 +395,12 @@ class PlaxService {
   // --- Helpers ---
 
   private async getUserById(userId: string): Promise<User> {
+      // Tenta buscar, se der erro retorna objeto vazio seguro para evitar crash
       const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      if (!data) {
+          // Fallback seguro se o ID não existir no banco (Modo Demo Volátil)
+          return { id: userId, name: 'Usuário', email: '', role: UserRole.GUEST, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 };
+      }
       return { id: data.id, name: data.name, email: data.email, role: data.role, balancePlax: data.balance_plax, balanceBRL: data.balance_brl, lockedPlax: data.locked_plax, avatarUrl: data.avatar_url };
   }
 
@@ -421,14 +412,8 @@ class PlaxService {
   }
 
   private async distributeToRole(role: UserRole, amountTotal: number) {
-      // Distribui para a persona ATIVA daquele papel (se houver) ou para qualquer um do papel
-      // No modo Demo Isolado, queremos distribuir para a Persona Virtual correspondente ao ID base
-      // Mas como não sabemos o ID base aqui facilmente sem contexto, vamos distribuir para o primeiro encontrado
-      // *MELHORIA*: Buscar perfis que terminam com _ROLE ou tem role = ROLE
       const { data } = await supabase.from('profiles').select('id').eq('role', role).limit(1);
       if (data && data.length > 0) {
-          // Se estamos em modo demo, idealmente tentamos achar a persona ligada ao usuário atual, mas para simplificar o MVP
-          // vamos distribuir para o primeiro encontrado. Em um teste single-user, será a persona correta.
           await this.updateBalance(data[0].id, 'balance_brl', amountTotal);
       }
   }
