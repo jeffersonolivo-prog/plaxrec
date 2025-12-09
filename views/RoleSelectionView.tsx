@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserRole } from '../types';
-import { Recycle, Truck, Factory, Leaf, Shield, Loader2, ArrowRight } from 'lucide-react';
+import { Recycle, Truck, Factory, Leaf, Shield, Loader2, AlertTriangle } from 'lucide-react';
 
 interface RoleSelectionViewProps {
   onSelectRole: (role: UserRole) => void;
@@ -11,6 +11,9 @@ const RoleSelectionView: React.FC<RoleSelectionViewProps> = ({ onSelectRole, use
   const [loading, setLoading] = useState(false);
 
   const handleSelect = async (role: UserRole) => {
+    const confirm = window.confirm("Confirmar a escolha deste perfil para esta conta?");
+    if (!confirm) return;
+
     setLoading(true);
     // Pequeno delay para feedback visual
     await new Promise(r => setTimeout(r, 500));
@@ -29,10 +32,18 @@ const RoleSelectionView: React.FC<RoleSelectionViewProps> = ({ onSelectRole, use
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="text-center mb-10 max-w-2xl">
+      <div className="text-center mb-6 max-w-2xl">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Bem-vindo, {userName}!</h1>
         <p className="text-lg text-gray-600">Para começar, precisamos saber qual é o seu papel na cadeia de reciclagem.</p>
-        <p className="text-sm text-gray-500 mt-2">Escolha a persona que melhor descreve sua atividade.</p>
+      </div>
+
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-8 max-w-2xl text-sm text-yellow-800 flex items-start">
+        <AlertTriangle className="mr-3 shrink-0 mt-0.5" size={20} />
+        <span>
+            <strong>Atenção:</strong> Esta escolha definirá o tipo da sua conta. 
+            Para atuar em outro papel (ex: testar como Reciclador após criar um Coletor), 
+            você precisará criar um novo cadastro com outro e-mail.
+        </span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl w-full">
