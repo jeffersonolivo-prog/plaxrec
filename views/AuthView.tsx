@@ -98,6 +98,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                         <option value={UserRole.RECYCLER}>Reciclador</option>
                         <option value={UserRole.TRANSFORMER}>Transformador</option>
                         <option value={UserRole.ESG_BUYER}>Comprador ESG</option>
+                        <option value={UserRole.ADMIN}>Administrador</option>
                     </select>
                 </div>
 
