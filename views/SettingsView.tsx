@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
-import { Save, User as UserIcon, Lock, RefreshCw, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Save, User as UserIcon, Lock, RefreshCw, Loader2, Image as ImageIcon, AlertTriangle } from 'lucide-react';
 
 interface SettingsViewProps {
   user: User;
@@ -13,7 +13,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
   const [loading, setLoading] = useState(false);
   
   // Profile State
-  const [name, setName] = useState(user.name);
+  const [name, setName] = useState(user.name.split(' (')[0]); // Remove sufixo da persona se houver
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '');
   
   // Password State
@@ -37,37 +37,56 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
     if (res.success) {
         alert(res.message);
         setNewPassword('');
-        onUpdateUser(); // Refresh Global User State
+        onUpdateUser(); 
     } else {
         alert('Erro: ' + res.message);
     }
   };
 
   const handleChangeRole = async () => {
+      // Verifica se é o mesmo papel atual
       if (selectedRole === user.role) return;
       
-      const confirmChange = window.confirm("Trocar de persona em modo DEMO? A interface será recarregada com as permissões do novo papel.");
+      const confirmChange = window.confirm(
+          `Trocar para a Persona: ${selectedRole}?\n\n` +
+          "Isso criará/carregará uma carteira isolada para este perfil. " +
+          "Seus dados do perfil anterior permanecerão salvos."
+      );
       if (!confirmChange) return;
 
       setLoading(true);
-      const res = await plaxService.updateProfileRole(user.id, selectedRole);
-      setLoading(false);
-
-      if (res.success) {
-          onUpdateUser(); // Forces app refresh
-      } else {
-          alert("Erro ao trocar papel: " + res.message);
-      }
+      
+      // Usa a nova lógica de Persona Virtual
+      plaxService.setDemoPersona(selectedRole);
+      
+      // Delay para garantir que o serviço atualizou o storage/estado
+      setTimeout(() => {
+          setLoading(false);
+          // Recarrega a aplicação inteira para garantir que todos os componentes peguem o novo ID Virtual
+          window.location.reload();
+      }, 1000);
   };
 
+  const resetDemo = () => {
+      if(window.confirm("Isso irá desconectar as personas virtuais e voltar para sua conta real original.")) {
+          plaxService.setDemoPersona(null);
+          window.location.reload();
+      }
+  }
+
+  const isVirtual = user.id.includes('_');
+
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
+    <div className="space-y-8 max-w-4xl mx-auto animate-in fade-in duration-500">
       
       {/* 1. Profile Section */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-         <div className="p-6 border-b border-gray-100 bg-gray-50 flex items-center">
-             <UserIcon className="text-gray-400 mr-3" size={20} />
-             <h2 className="font-bold text-gray-700">Dados do Perfil</h2>
+         <div className="p-6 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+             <div className="flex items-center">
+                <UserIcon className="text-gray-400 mr-3" size={20} />
+                <h2 className="font-bold text-gray-700">Dados do Perfil {isVirtual && '(Persona Virtual)'}</h2>
+             </div>
+             {isVirtual && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded border border-indigo-200">ID: {user.id}</span>}
          </div>
          <div className="p-6">
              <form onSubmit={handleUpdateProfile} className="space-y-6">
@@ -81,14 +100,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
                                  <span className="text-4xl font-bold text-plax-600">{name.charAt(0)}</span>
                              )}
                          </div>
-                         <p className="text-xs text-gray-400 text-center">Pré-visualização</p>
                      </div>
 
                      {/* Inputs */}
                      <div className="flex-1 space-y-4">
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                              <div>
-                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nome Completo</label>
+                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nome de Exibição</label>
                                  <input 
                                      type="text" 
                                      className="w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-plax-500 outline-none"
@@ -97,7 +115,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
                                  />
                              </div>
                              <div>
-                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email (Fixo)</label>
+                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
                                  <input 
                                      type="email" 
                                      disabled
@@ -109,28 +127,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
 
                          <div>
                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center">
-                                 <ImageIcon size={14} className="mr-1"/> URL da Foto (Avatar)
+                                 <ImageIcon size={14} className="mr-1"/> URL da Foto
                              </label>
                              <input 
                                  type="text" 
                                  className="w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-plax-500 outline-none"
-                                 placeholder="https://exemplo.com/minha-foto.jpg"
                                  value={avatarUrl}
                                  onChange={e => setAvatarUrl(e.target.value)}
-                             />
-                             <p className="text-xs text-gray-400 mt-1">Cole o link direto de uma imagem hospedada na web (Imgur, LinkedIn, etc).</p>
-                         </div>
-
-                         <div className="pt-4 border-t border-gray-100 mt-4">
-                             <label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center text-red-400">
-                                 <Lock size={14} className="mr-1"/> Alterar Senha
-                             </label>
-                             <input 
-                                 type="password" 
-                                 className="w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-red-200 outline-none border-red-100"
-                                 placeholder="Nova senha (deixe em branco para manter a atual)"
-                                 value={newPassword}
-                                 onChange={e => setNewPassword(e.target.value)}
                              />
                          </div>
                      </div>
@@ -143,7 +146,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
                         className="bg-plax-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-plax-700 shadow-md flex items-center"
                      >
                          {loading ? <Loader2 className="animate-spin mr-2"/> : <Save className="mr-2" size={18}/>}
-                         Salvar Alterações
+                         Salvar
                      </button>
                  </div>
              </form>
@@ -152,23 +155,29 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
 
       {/* 2. Persona Switching (Demo Mode) */}
       <div className="bg-indigo-50 rounded-xl shadow-sm border border-indigo-100 overflow-hidden relative">
-         <div className="absolute top-0 right-0 bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-bl-lg">
-             MODO DEMONSTRAÇÃO
+         <div className="absolute top-0 right-0 bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-bl-lg z-10">
+             DEMO MODE: ISOLAMENTO ATIVO
          </div>
          <div className="p-6 border-b border-indigo-100 flex items-center">
              <RefreshCw className="text-indigo-600 mr-3" size={20} />
-             <h2 className="font-bold text-indigo-900">Alternar Persona</h2>
+             <h2 className="font-bold text-indigo-900">Gerenciador de Personas</h2>
          </div>
          <div className="p-6">
-             <p className="text-sm text-indigo-800 mb-4">
-                 Utilize esta ferramenta para transitar entre os diferentes papéis da cadeia de reciclagem e demonstrar o fluxo completo da plataforma.
-             </p>
+             <div className="bg-white p-4 rounded-lg border border-indigo-100 shadow-sm mb-6">
+                 <div className="flex items-start gap-3">
+                     <AlertTriangle className="text-orange-500 shrink-0 mt-1" size={18} />
+                     <p className="text-sm text-gray-600">
+                         Neste modo, cada papel funciona como um usuário distinto com sua própria carteira. 
+                         Ao trocar para "Coletor", você verá apenas o saldo e transações do Coletor.
+                     </p>
+                 </div>
+             </div>
 
-             <div className="flex flex-col sm:flex-row items-end gap-4 bg-white p-4 rounded-lg border border-indigo-100 shadow-sm">
+             <div className="flex flex-col sm:flex-row items-end gap-4">
                  <div className="flex-1 w-full">
-                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Papel Atual</label>
+                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Selecionar Persona para Simular</label>
                      <select 
-                        className="w-full border-2 border-indigo-100 rounded-lg px-4 py-2 text-indigo-900 font-bold focus:outline-none focus:border-indigo-500"
+                        className="w-full border-2 border-indigo-100 rounded-lg px-4 py-3 text-indigo-900 font-bold focus:outline-none focus:border-indigo-500"
                         value={selectedRole}
                         onChange={(e) => setSelectedRole(e.target.value as UserRole)}
                      >
@@ -177,22 +186,29 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
                          <option value={UserRole.TRANSFORMER}>TRANSFORMADOR (Indústria Final)</option>
                          <option value={UserRole.ESG_BUYER}>COMPRADOR ESG (Investidor)</option>
                          <option value={UserRole.ADMIN}>ADMINISTRADOR (Auditoria)</option>
-                         <option value={UserRole.GUEST}>VISITANTE (Reset)</option>
                      </select>
                  </div>
                  <button 
                     onClick={handleChangeRole}
                     disabled={loading || selectedRole === user.role}
-                    className={`px-6 py-2.5 rounded-lg font-bold flex items-center shadow-sm transition-all
+                    className={`px-6 py-3 rounded-lg font-bold flex items-center shadow-sm transition-all whitespace-nowrap
                         ${selectedRole === user.role 
                             ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
                             : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}
                     `}
                  >
                     {loading ? <Loader2 className="animate-spin mr-2"/> : <RefreshCw className="mr-2" size={18}/>}
-                    Trocar Agora
+                    Trocar Persona
                  </button>
              </div>
+             
+             {isVirtual && (
+                 <div className="mt-6 pt-6 border-t border-indigo-100 flex justify-center">
+                     <button onClick={resetDemo} className="text-xs text-indigo-400 hover:text-indigo-600 underline">
+                         Sair do Modo Persona e Voltar ao Usuário Real
+                     </button>
+                 </div>
+             )}
          </div>
       </div>
 
