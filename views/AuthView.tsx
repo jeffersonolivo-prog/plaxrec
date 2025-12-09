@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
-import { Recycle, UserPlus, LogIn, Loader2, AlertTriangle } from 'lucide-react';
+import { Recycle, UserPlus, LogIn, Loader2 } from 'lucide-react';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
@@ -33,13 +33,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     if (user) {
       onLogin(user);
     } else {
-      if (error && error.includes('Email not confirmed')) {
-          alert('⚠️ AÇÃO NECESSÁRIA NO SUPABASE ⚠️\n\nO erro "Email not confirmed" ocorreu.\n\nPara corrigir em ambiente de teste:\n1. Vá ao painel do seu projeto Supabase.\n2. Clique em "Authentication" (menu lateral) -> "Providers" -> "Email".\n3. DESMARQUE a opção "Confirm email".\n4. Salve.\n\nAlternativamente, verifique o e-mail cadastrado e clique no link de confirmação.');
-      } else if (error && error.includes('Invalid login credentials')) {
-          alert('Email ou senha incorretos.');
-      } else {
-          alert(`Erro: ${error}\n\nVerifique se você configurou as chaves em services/supabaseClient.ts`);
-      }
+      handleAuthError(error);
     }
   };
 
@@ -48,11 +42,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
       const { error } = await plaxService.loginWithGoogle(googleRole);
       if (error) {
           setLoading(false);
-          if (error.includes('Supabase não configurado')) {
-             alert(error);
-          } else {
-             alert("Erro ao iniciar login com Google. Verifique o console para mais detalhes.");
-          }
+          handleAuthError(error);
       }
   };
 
@@ -67,8 +57,22 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     if (user) {
       onLogin(user);
     } else {
-      alert(error || 'Erro ao criar conta.');
+      handleAuthError(error);
     }
+  };
+
+  const handleAuthError = (error?: string) => {
+      if (!error) return;
+      
+      if (error.includes('Supabase não configurado') || error.includes('placeholder')) {
+          alert('ERRO DE CONFIGURAÇÃO:\n\nVocê precisa editar o arquivo "services/supabaseClient.ts" e colocar suas chaves do Supabase nas variáveis SUPABASE_URL e SUPABASE_ANON_KEY.');
+      } else if (error.includes('Email not confirmed')) {
+          alert('⚠️ AÇÃO NECESSÁRIA NO SUPABASE ⚠️\n\nErro: Email não confirmado.\n\nSolução: Vá no painel do Supabase -> Authentication -> Providers -> Email -> Desmarque "Confirm email".');
+      } else if (error.includes('Invalid login credentials')) {
+          alert('Email ou senha incorretos.');
+      } else {
+          alert(`Erro: ${error}`);
+      }
   };
 
   return (
@@ -222,11 +226,6 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                     {isRegistering ? 'Já tem uma conta? Entre aqui.' : 'Não tem conta? Crie agora.'}
                 </button>
             </div>
-            
-             <div className="mt-4 p-3 bg-yellow-50 border border-yellow-100 rounded text-xs text-yellow-700 flex items-start">
-               <AlertTriangle size={14} className="mr-2 mt-0.5 shrink-0" />
-               <p>Este aplicativo está em modo de PRODUÇÃO. Certifique-se de ter configurado as chaves do Supabase corretamente no arquivo de serviço.</p>
-             </div>
         </div>
       </div>
     </div>

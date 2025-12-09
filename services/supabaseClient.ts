@@ -1,35 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-// --- CONFIGURAÇÃO DE PRODUÇÃO ---
-// Para sair do modo DEMO e fazer o login funcionar, você deve:
-// 1. Ir no painel do Supabase > Project Settings > API.
-// 2. Copiar a "Project URL" e a "anon public key".
-// 3. Colar abaixo substituindo as strings vazias ou de exemplo.
+// ------------------------------------------------------------------
+// CONFIGURAÇÃO DIRETA (RESOLUÇÃO NA FONTE)
+// ------------------------------------------------------------------
 
-export const SUPABASE_URL = 'COLE_SUA_URL_DO_SUPABASE_AQUI'; // Ex: https://xyz.supabase.co
-export const SUPABASE_ANON_KEY = 'COLE_SUA_ANON_KEY_AQUI';   // Ex: eyJhbGciOiJIUzI1NiIsInR...
+export const SUPABASE_URL = 'https://eclxjggicyfqjpgeytjk.supabase.co'; 
+export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjbHhqZ2dpY3lmcWpwZ2V5dGprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUyNTI2MjcsImV4cCI6MjA4MDgyODYyN30.R3odqxLo6w-PCXnIrtZyvBmuUqzvl1AwRMugTE0k-uQ';
 
-// --- VALIDAÇÃO DE SEGURANÇA (Evita tela branca) ---
-// Verifica se a URL é válida para não quebrar a execução do Javascript
-
-const isUrlValid = (url: string) => {
-    try {
-        new URL(url);
-        return true;
-    } catch (e) {
-        return false;
-    }
+// Verificação de segurança simples
+const isValidUrl = (url: string) => {
+    try { return !!new URL(url); } catch { return false; }
 };
 
-const hasValidConfig = isUrlValid(SUPABASE_URL) && !SUPABASE_URL.includes('COLE_SUA') && !SUPABASE_ANON_KEY.includes('COLE_SUA');
+const urlToUse = isValidUrl(SUPABASE_URL) ? SUPABASE_URL : 'https://placeholder.supabase.co';
+// Cast to string to prevent TypeScript error about disjoint types comparison
+const keyToUse = (SUPABASE_ANON_KEY as string) !== 'COLE_SUA_KEY_AQUI' ? SUPABASE_ANON_KEY : 'placeholder';
 
-if (!hasValidConfig) {
-    console.warn("⚠️ AVISO PLAXREC: As chaves do Supabase não estão configuradas corretamente em services/supabaseClient.ts. O app carregará, mas a conexão falhará.");
-}
-
-// Se a configuração for inválida, usamos valores "dummy" seguros para que o createClient não lance uma exceção fatal.
-// Isso permite que o App abra e mostre a tela de erro para o usuário corrigir, em vez de ficar uma tela branca.
-const safeUrl = hasValidConfig ? SUPABASE_URL : 'https://placeholder.supabase.co';
-const safeKey = hasValidConfig ? SUPABASE_ANON_KEY : 'placeholder';
-
-export const supabase = createClient(safeUrl, safeKey);
+export const supabase = createClient(urlToUse, keyToUse);
