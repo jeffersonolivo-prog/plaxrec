@@ -9,7 +9,6 @@ export const INSTITUTIONS = [
 ];
 
 class PlaxService {
-  private activePersonaRole: UserRole | null = null;
 
   private checkConfig() {
       const url = SUPABASE_URL;
@@ -20,34 +19,6 @@ class PlaxService {
       return null;
   }
 
-  // --- Virtual Persona Logic ---
-
-  setDemoPersona(role: UserRole | null) {
-      if (role) {
-          this.activePersonaRole = role;
-          localStorage.setItem('plax_demo_role', role);
-      } else {
-          this.activePersonaRole = null;
-          localStorage.removeItem('plax_demo_role');
-      }
-  }
-
-  getDemoPersona(): UserRole | null {
-      if (this.activePersonaRole) return this.activePersonaRole;
-      return localStorage.getItem('plax_demo_role') as UserRole || null;
-  }
-
-  private getEffectiveUserId(authUserId: string): string {
-      // Garante que o ID base não seja já um ID virtual, prevenindo recursão
-      const baseId = authUserId.includes('_') ? authUserId.split('_')[0] : authUserId;
-      const role = this.getDemoPersona();
-      
-      if (role && role !== UserRole.GUEST) {
-          return `${baseId}_${role}`;
-      }
-      return baseId;
-  }
-
   // --- Auth & User ---
 
   async getCurrentUser(authUserId: string): Promise<User | null> {
@@ -56,17 +27,14 @@ class PlaxService {
     if (configError) { console.error(configError); return null; }
 
     try {
-        const effectiveId = this.getEffectiveUserId(authUserId);
-        const currentRole = this.getDemoPersona();
-
-        // 1. Tenta buscar o perfil (Real ou Virtual)
+        // 1. Busca o perfil real no banco
         const { data, error } = await supabase
             .from('profiles')
             .select('*')
-            .eq('id', effectiveId)
+            .eq('id', authUserId)
             .single();
         
-        // Se encontrou e não deu erro (incluindo RLS), retorna
+        // Se encontrou, retorna o usuário formatado
         if (data && !error) {
             return {
                 id: data.id,
@@ -80,56 +48,7 @@ class PlaxService {
             };
         }
 
-        // 2. Se não encontrou e estamos em MODO DEMO, cria objeto VIRTUAL
-        if (currentRole) {
-            console.log(`Usando persona virtual na memória: ${effectiveId}`);
-            
-            // Tenta pegar nome do usuário real, se falhar usa genérico
-            let baseName = 'Usuário Demo';
-            let baseEmail = 'demo@plaxrec.com';
-            let avatar = '';
-
-            // Tenta ler o user real (pode falhar por RLS dependendo da config, mas geralmente user pode ler seu próprio profile)
-            // Usa o ID base real para essa consulta
-            const baseId = authUserId.split('_')[0];
-            const { data: realProfile } = await supabase.from('profiles').select('*').eq('id', baseId).single();
-            
-            if (realProfile) {
-                baseName = realProfile.name;
-                baseEmail = realProfile.email;
-                avatar = realProfile.avatar_url;
-            }
-
-            const newPersona: User = {
-                id: effectiveId,
-                name: `${baseName} (${currentRole})`,
-                email: baseEmail,
-                role: currentRole,
-                balancePlax: 0,
-                balanceBRL: 0,
-                lockedPlax: 0,
-                avatarUrl: avatar
-            };
-
-            // Tenta salvar no banco apenas para persistência futura, mas não bloqueia se falhar
-            // (Isso corrige o problema do usuário ser desconectado se o DB bloquear a criação)
-            supabase.from('profiles').insert({
-                id: effectiveId,
-                name: newPersona.name,
-                email: newPersona.email,
-                role: newPersona.role,
-                balance_plax: 0,
-                balance_brl: 0,
-                locked_plax: 0,
-                avatar_url: avatar
-            }).then(({ error }) => {
-                if(error) console.warn("Modo Volátil: Persistência no banco falhou (provavelmente RLS/FK), mas o app continuará funcionando.", error.message);
-            });
-
-            return newPersona;
-        }
-
-        // 3. Fallback para usuário original (primeiro acesso real ou erro de leitura)
+        // 2. Se não encontrou perfil, mas o Auth existe (ex: primeiro login após registro), cria o perfil GUEST
         const { data: authData } = await supabase.auth.getUser();
         if (authData.user && authData.user.id === authUserId) {
              const newProfileData = {
@@ -141,7 +60,15 @@ class PlaxService {
                 balance_brl: 0,
                 locked_plax: 0,
             };
-            await supabase.from('profiles').insert(newProfileData);
+            
+            // Tenta inserir
+            const { error: insertError } = await supabase.from('profiles').insert(newProfileData);
+            
+            if (insertError) {
+                console.error("Erro ao criar perfil inicial:", insertError);
+                return null;
+            }
+
             return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
         }
 
@@ -156,8 +83,6 @@ class PlaxService {
   async login(email: string, password: string): Promise<{ user: User | null, error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
-
-    this.setDemoPersona(null);
 
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
@@ -174,7 +99,7 @@ class PlaxService {
   async loginWithGoogle(): Promise<{ error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { error: configError };
-    this.setDemoPersona(null);
+    
     const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: window.location.origin }
@@ -185,7 +110,7 @@ class PlaxService {
   async register(name: string, email: string, password: string): Promise<{ user: User | null, error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
-    this.setDemoPersona(null);
+    
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email, password, options: { data: { name, role: UserRole.GUEST } }
     });
@@ -213,7 +138,7 @@ class PlaxService {
           avatar_url: updates.avatarUrl
       }).eq('id', userId);
 
-      if (updates.password && !userId.includes('_')) {
+      if (updates.password) {
           await supabase.auth.updateUser({ password: updates.password });
       }
       
@@ -221,7 +146,6 @@ class PlaxService {
   }
 
   async logout() {
-      this.setDemoPersona(null);
       await supabase.auth.signOut();
   }
 
@@ -231,46 +155,15 @@ class PlaxService {
       const configError = this.checkConfig();
       if (configError) return [];
       
-      // 1. Busca usuários reais do banco
+      // Busca TODOS os usuários reais do banco para popular os selects
       const { data } = await supabase.from('profiles').select('*');
-      let users: User[] = [];
       
-      if (data) {
-        users = data.map((d: any) => ({
-            id: d.id, name: d.name, email: d.email, role: d.role as UserRole,
-            balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax, avatarUrl: d.avatar_url
-        }));
-      }
+      if (!data) return [];
 
-      // 2. Injeta automaticamente as personas virtuais do usuário atual
-      // Isso permite que você se veja nos dropdowns (ex: Reciclador selecionando Coletor)
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-          const baseId = session.user.id;
-          const userMetaName = session.user.user_metadata.name || 'Meu Usuário';
-          
-          // Personas para injetar se não existirem no banco
-          const demoRoles = [UserRole.COLLECTOR, UserRole.RECYCLER, UserRole.TRANSFORMER, UserRole.ESG_BUYER];
-          
-          demoRoles.forEach(role => {
-              const virtualId = `${baseId}_${role}`;
-              // Verifica se já não veio do banco
-              if (!users.find(u => u.id === virtualId)) {
-                  users.push({
-                      id: virtualId,
-                      name: `${userMetaName} (${role})`,
-                      email: session.user.email || '',
-                      role: role,
-                      balancePlax: 0,
-                      balanceBRL: 0,
-                      lockedPlax: 0,
-                      avatarUrl: users.find(u => u.id === baseId)?.avatarUrl // Tenta herdar avatar do perfil principal
-                  });
-              }
-          });
-      }
-
-      return users;
+      return data.map((d: any) => ({
+          id: d.id, name: d.name, email: d.email, role: d.role as UserRole,
+          balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax, avatarUrl: d.avatar_url
+      }));
   }
 
   async getTransactions(userId?: string): Promise<Transaction[]> {
@@ -316,14 +209,19 @@ class PlaxService {
 
   async registerCollection(recyclerId: string, collectorId: string, weight: number, plasticType: PlasticType) {
     const plaxAmount = weight * KG_TO_PLAX_RATE;
+    
+    // 1. Cria o lote
     const { error } = await supabase.from('batches').insert({
         collector_id: collectorId, recycler_id: recyclerId, weight_kg: weight,
         plastic_type: plasticType, plax_generated: plaxAmount, status: 'RECEIVED'
     });
     if (error) return { success: false, message: error.message };
 
+    // 2. Atualiza saldos REAIS
     await this.updateBalance(collectorId, 'balance_plax', plaxAmount);
     await this.updateBalance(recyclerId, 'locked_plax', plaxAmount);
+    
+    // 3. Registra transação
     await supabase.from('transactions').insert({
         type: 'COLLECTION', amount_plax: plaxAmount, description: `Coleta: ${weight}kg ${plasticType}`,
         status: 'COMPLETED', to_user_id: collectorId, from_user_id: recyclerId
@@ -437,54 +335,29 @@ class PlaxService {
   // --- Helpers ---
 
   private async getUserById(userId: string): Promise<User> {
-      // Tenta buscar, se der erro retorna objeto vazio seguro para evitar crash
       const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
       if (!data) {
-          // Fallback seguro se o ID não existir no banco (Modo Demo Volátil)
-          return { id: userId, name: 'Usuário', email: '', role: UserRole.GUEST, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 };
+          // Fallback mínimo se não achar usuário (para evitar crash), mas isso indica erro de integridade
+          console.warn("Usuário não encontrado na transação:", userId);
+          return { id: userId, name: 'Desconhecido', email: '', role: UserRole.GUEST, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 };
       }
       return { id: data.id, name: data.name, email: data.email, role: data.role, balancePlax: data.balance_plax, balanceBRL: data.balance_brl, lockedPlax: data.locked_plax, avatarUrl: data.avatar_url };
   }
 
   private async updateBalance(userId: string, field: string, amount: number) {
-      // 1. Tenta encontrar o usuário para atualizar
+      // Atualização direta no banco. Supabase lida com a persistência.
       const { data } = await supabase.from('profiles').select(field).eq('id', userId).single();
       
       if (data) {
-          // 2. Se existe, apenas atualiza
           await supabase.from('profiles').update({ [field]: (data[field] || 0) + amount }).eq('id', userId);
       } else {
-          // 3. Se NÃO existe (é uma Persona Virtual usada pela primeira vez na transação)
-          // Precisamos criá-la no banco para receber o saldo
-          console.log(`Criando perfil para persona destino: ${userId}`);
-          
-          const baseId = userId.includes('_') ? userId.split('_')[0] : userId;
-          
-          // Tenta pegar dados do "pai" (usuário real) para copiar nome/email
-          const { data: parent } = await supabase.from('profiles').select('*').eq('id', baseId).single();
-          
-          const roleSuffix = userId.includes('_') ? userId.split('_')[1] : 'GUEST';
-          
-          const newProfile = {
-              id: userId,
-              name: parent ? `${parent.name} (${roleSuffix})` : `User ${roleSuffix}`,
-              email: parent ? parent.email : '',
-              role: roleSuffix,
-              // Define o saldo inicial já com o valor da transação
-              balance_plax: field === 'balance_plax' ? amount : 0,
-              balance_brl: field === 'balance_brl' ? amount : 0,
-              locked_plax: field === 'locked_plax' ? amount : 0,
-              avatar_url: parent ? parent.avatar_url : ''
-          };
-
-          const { error } = await supabase.from('profiles').insert(newProfile);
-          if (error) {
-              console.error("Falha ao criar persona no updateBalance:", error);
-          }
+          console.error(`Tentativa de atualizar saldo de usuário inexistente: ${userId}. Operação ignorada.`);
       }
   }
 
   private async distributeToRole(role: UserRole, amountTotal: number) {
+      // Distribui para o PRIMEIRO usuário encontrado daquele papel
+      // Em produção real, isso seria um fundo comum ou distribuído entre todos
       const { data } = await supabase.from('profiles').select('id').eq('role', role).limit(1);
       if (data && data.length > 0) {
           await this.updateBalance(data[0].id, 'balance_brl', amountTotal);

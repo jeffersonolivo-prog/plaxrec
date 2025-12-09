@@ -62,15 +62,9 @@ const App: React.FC = () => {
   }, []);
 
   const handleRefresh = async () => {
-    // CORREÇÃO CRÍTICA: Sempre busca o ID real da sessão, nunca o ID do estado (que pode ser virtual)
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
         const updated = await plaxService.getCurrentUser(session.user.id);
-        if (updated) setCurrentUser({...updated});
-    } else if (currentUser) {
-        // Fallback: se a sessão falhar mas tivermos user (ex: dev mode), tenta usar o ID base
-        const baseId = currentUser.id.split('_')[0]; 
-        const updated = await plaxService.getCurrentUser(baseId);
         if (updated) setCurrentUser({...updated});
     }
   };
