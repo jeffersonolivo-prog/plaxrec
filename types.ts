@@ -16,6 +16,7 @@ export interface User {
   balancePlax: number; // Available Plax
   balanceBRL: number; // Available Real
   lockedPlax: number; // For Recycler/Transformer before NFe
+  avatarUrl?: string; // Optional URL for profile picture
 }
 
 export enum PlasticType {

@@ -45,10 +45,11 @@ class PlaxService {
                 id: data.id,
                 name: data.name,
                 email: data.email,
-                role: (data.role as UserRole) || UserRole.GUEST, // Garante fallback se vier null do banco
+                role: (data.role as UserRole) || UserRole.GUEST, 
                 balancePlax: data.balance_plax || 0,
                 balanceBRL: data.balance_brl || 0,
-                lockedPlax: data.locked_plax || 0
+                lockedPlax: data.locked_plax || 0,
+                avatarUrl: data.avatar_url || ''
             };
         }
 
@@ -61,7 +62,7 @@ class PlaxService {
             
             const meta = authUser.user_metadata || {};
             const fallbackName = meta.name || authUser.email?.split('@')[0] || 'Novo Usuário';
-            // IMPORTANTE: Default agora é GUEST para forçar a tela de seleção
+            const fallbackAvatar = meta.avatar_url || '';
             const fallbackRole = UserRole.GUEST;
 
             const newProfileData = {
@@ -71,7 +72,8 @@ class PlaxService {
                 role: fallbackRole,
                 balance_plax: 0,
                 balance_brl: 0,
-                locked_plax: 0
+                locked_plax: 0,
+                avatar_url: fallbackAvatar
             };
 
             // 3. Tenta inserir no banco (Self-Healing)
@@ -88,7 +90,8 @@ class PlaxService {
                 role: newProfileData.role,
                 balancePlax: 0,
                 balanceBRL: 0,
-                lockedPlax: 0
+                lockedPlax: 0,
+                avatarUrl: newProfileData.avatar_url
             };
         }
 
@@ -124,14 +127,12 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { error: configError };
 
-    // Captura a URL base atual do navegador para garantir que o redirecionamento volte para cá
     const currentOrigin = window.location.origin;
 
     const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
             redirectTo: currentOrigin,
-            // Removido queryParams (access_type, prompt) para evitar erros de configuração no console do Google
         }
     });
 
@@ -142,7 +143,6 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
 
-    // No registro, definimos explicitamente como GUEST
     const role = UserRole.GUEST;
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -169,17 +169,50 @@ class PlaxService {
       if (configError) return { success: false, message: configError };
       
       try {
-          // 1. Atualiza Tabela Profiles
           const { error } = await supabase.from('profiles').update({ role: role }).eq('id', userId);
           if (error) throw error;
-
-          // 2. Atualiza Metadata do Auth (opcional, mas bom para consistência)
           await supabase.auth.updateUser({ data: { role: role } });
-
           return { success: true };
       } catch (e: any) {
           console.error("Erro ao atualizar papel:", e);
           return { success: false, message: e.message };
+      }
+  }
+
+  async updateProfile(userId: string, updates: { name?: string; avatarUrl?: string; password?: string }) {
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
+
+      try {
+          // 1. Update Database Fields
+          const dbUpdates: any = {};
+          if (updates.name) dbUpdates.name = updates.name;
+          if (updates.avatarUrl !== undefined) dbUpdates.avatar_url = updates.avatarUrl;
+
+          if (Object.keys(dbUpdates).length > 0) {
+              const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
+              if (error) throw error;
+          }
+
+          // 2. Update Auth (Password or Metadata)
+          const authUpdates: any = {};
+          if (updates.password) authUpdates.password = updates.password;
+          if (updates.name || updates.avatarUrl) {
+              authUpdates.data = {};
+              if (updates.name) authUpdates.data.name = updates.name;
+              if (updates.avatarUrl) authUpdates.data.avatar_url = updates.avatarUrl;
+          }
+
+          if (Object.keys(authUpdates).length > 0) {
+              const { error: authError } = await supabase.auth.updateUser(authUpdates);
+              if (authError) throw authError;
+          }
+
+          return { success: true, message: 'Perfil atualizado com sucesso!' };
+
+      } catch (e: any) {
+          console.error("Erro ao atualizar perfil:", e);
+          return { success: false, message: e.message || 'Erro ao atualizar.' };
       }
   }
 
@@ -197,7 +230,8 @@ class PlaxService {
       if (!data) return [];
       return data.map((d: any) => ({
         id: d.id, name: d.name, email: d.email, role: d.role as UserRole,
-        balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax
+        balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax,
+        avatarUrl: d.avatar_url
       }));
   }
 

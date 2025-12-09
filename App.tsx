@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import { CollectorView, RecyclerView, TransformerView, ESGView, AdminView } from './views/DashboardViews';
 import WalletView from './views/WalletView';
 import { ReportsView } from './views/ReportsView';
+import SettingsView from './views/SettingsView';
 import AuthView from './views/AuthView';
 import RoleSelectionView from './views/RoleSelectionView';
 import PlaxAssistant from './components/PlaxAssistant';
@@ -76,6 +77,10 @@ const App: React.FC = () => {
     
     if (currentView === 'REPORTS') {
         return <ReportsView user={currentUser} refresh={handleRefresh} />;
+    }
+
+    if (currentView === 'SETTINGS') {
+        return <SettingsView user={currentUser} refresh={handleRefresh} onUpdateUser={handleRefresh} />;
     }
 
     // DASHBOARD View logic

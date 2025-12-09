@@ -8,7 +8,8 @@ import {
   BarChart3, 
   LogOut,
   Menu,
-  X
+  X,
+  Settings
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -65,9 +66,13 @@ const Layout: React.FC<LayoutProps> = ({ currentUser, children, onLogout, curren
           <div className="mb-6 px-4">
              <p className="text-xs uppercase text-plax-400 font-semibold mb-2">Perfil</p>
              <div className="flex items-center space-x-3 bg-plax-800 p-3 rounded-lg">
-                <div className="h-10 w-10 min-w-[2.5rem] rounded-full bg-plax-500 flex items-center justify-center text-lg font-bold">
-                    {currentUser.name.charAt(0)}
-                </div>
+                {currentUser.avatarUrl ? (
+                    <img src={currentUser.avatarUrl} alt={currentUser.name} className="h-10 w-10 min-w-[2.5rem] rounded-full object-cover border-2 border-plax-500" />
+                ) : (
+                    <div className="h-10 w-10 min-w-[2.5rem] rounded-full bg-plax-500 flex items-center justify-center text-lg font-bold">
+                        {currentUser.name.charAt(0)}
+                    </div>
+                )}
                 <div className="overflow-hidden">
                     <p className="text-sm font-medium truncate">{currentUser.name}</p>
                     <p className="text-xs text-plax-300 truncate">{currentUser.role}</p>
@@ -101,6 +106,14 @@ const Layout: React.FC<LayoutProps> = ({ currentUser, children, onLogout, curren
                 onClick={() => handleNavigate('USERS')}
              />
           )}
+          <div className="pt-4 mt-2 border-t border-plax-800">
+             <NavItem 
+                icon={<Settings size={20} />} 
+                label="Configurações" 
+                active={currentView === 'SETTINGS'} 
+                onClick={() => handleNavigate('SETTINGS')}
+             />
+          </div>
         </nav>
 
         <div className="p-4 border-t border-plax-800">
@@ -134,6 +147,7 @@ const Layout: React.FC<LayoutProps> = ({ currentUser, children, onLogout, curren
             {currentView === 'WALLET' && 'Minha Carteira'}
             {currentView === 'REPORTS' && 'Relatórios'}
             {currentView === 'USERS' && 'Gestão de Usuários'}
+            {currentView === 'SETTINGS' && 'Configurações & Perfil'}
           </h1>
           <div className="flex items-center space-x-4 w-full sm:w-auto justify-end">
              <div className="flex flex-col items-end mr-2 sm:mr-4">
