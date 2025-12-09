@@ -7,6 +7,15 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
+      // Polyfill para evitar que 'process is not defined' quebre o app no navegador
+      window.process = {
+        env: {
+          NODE_ENV: 'development',
+          // A API Key será injetada pelo ambiente ou pode ser acessada de forma segura aqui se necessário
+        }
+      };
+    </script>
+    <script>
       tailwind.config = {
         theme: {
           extend: {

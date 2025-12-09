@@ -17,28 +17,34 @@ const App: React.FC = () => {
   useEffect(() => {
     // 1. Check active session on load (handles OAuth redirect)
     const initSession = async () => {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-            let user = await plaxService.getCurrentUser(session.user.id);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
             
-            // Check for pending role preference from Google Login redirect
-            const pendingRole = localStorage.getItem('plax_google_role_pref') as UserRole | null;
-            if (pendingRole && user) {
-                // If the user's current role is the default 'COLETOR' but they asked for something else, update it.
-                // Or update it regardless if it was a fresh signup.
-                if (user.role !== pendingRole) {
-                    await plaxService.updateProfileRole(user.id, pendingRole);
-                    user.role = pendingRole; // Optimistic update
+            if (session?.user) {
+                let user = await plaxService.getCurrentUser(session.user.id);
+                
+                // Check for pending role preference from Google Login redirect
+                const pendingRole = localStorage.getItem('plax_google_role_pref') as UserRole | null;
+                if (pendingRole && user) {
+                    // If the user's current role is the default 'COLETOR' but they asked for something else, update it.
+                    // Or update it regardless if it was a fresh signup.
+                    if (user.role !== pendingRole) {
+                        await plaxService.updateProfileRole(user.id, pendingRole);
+                        user.role = pendingRole; // Optimistic update
+                    }
+                    localStorage.removeItem('plax_google_role_pref');
                 }
-                localStorage.removeItem('plax_google_role_pref');
-            }
 
-            if (user) {
-                setCurrentUser(user);
+                if (user) {
+                    setCurrentUser(user);
+                }
             }
+        } catch (error) {
+            console.error("Erro ao inicializar sessão:", error);
+        } finally {
+            // Garante que o loading para, independente do sucesso ou falha
+            setCheckingSession(false);
         }
-        setCheckingSession(false);
     };
     initSession();
 
@@ -86,11 +92,10 @@ const App: React.FC = () => {
 
   if (checkingSession) {
       return (
-          <div className="min-h-screen flex items-center justify-center bg-gray-50">
-              <div className="text-center">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-plax-600 mx-auto mb-4"></div>
-                  <p className="text-gray-500">Carregando PlaxRec...</p>
-              </div>
+          <div className="min-h-screen flex items-center justify-center bg-gray-50 flex-col">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-plax-600 mb-4"></div>
+              <p className="text-gray-500 font-medium">Iniciando PlaxRec...</p>
+              <p className="text-xs text-gray-400 mt-2">Conectando ao banco de dados...</p>
           </div>
       )
   }

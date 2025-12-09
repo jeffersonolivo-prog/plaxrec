@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
-import { Recycle, UserPlus, LogIn, Users, Loader2 } from 'lucide-react';
+import { Recycle, UserPlus, LogIn, Loader2, AlertTriangle } from 'lucide-react';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
@@ -35,8 +35,10 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     } else {
       if (error && error.includes('Email not confirmed')) {
           alert('⚠️ AÇÃO NECESSÁRIA NO SUPABASE ⚠️\n\nO erro "Email not confirmed" ocorreu.\n\nPara corrigir em ambiente de teste:\n1. Vá ao painel do seu projeto Supabase.\n2. Clique em "Authentication" (menu lateral) -> "Providers" -> "Email".\n3. DESMARQUE a opção "Confirm email".\n4. Salve.\n\nAlternativamente, verifique o e-mail cadastrado e clique no link de confirmação.');
+      } else if (error && error.includes('Invalid login credentials')) {
+          alert('Email ou senha incorretos.');
       } else {
-          alert(error || 'Credenciais inválidas. Se você acabou de configurar o Supabase, crie uma conta nova.');
+          alert(`Erro: ${error}\n\nVerifique se você configurou as chaves em services/supabaseClient.ts`);
       }
     }
   };
@@ -46,7 +48,11 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
       const { error } = await plaxService.loginWithGoogle(googleRole);
       if (error) {
           setLoading(false);
-          alert("Erro ao iniciar login com Google: " + error);
+          if (error.includes('Supabase não configurado')) {
+             alert(error);
+          } else {
+             alert("Erro ao iniciar login com Google. Verifique o console para mais detalhes.");
+          }
       }
   };
 
@@ -85,7 +91,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                 {isRegistering ? 'Criar Nova Conta' : 'Acessar Conta'}
             </h2>
 
-            {/* Google Login Section - Movido para o topo para maior visibilidade */}
+            {/* Google Login Section */}
             <div className="mb-6 pb-6 border-b border-gray-100">
                 <div className="mb-2">
                     <label className="block text-xs text-center text-gray-500 mb-1">Entrar como:</label>
@@ -216,6 +222,11 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                     {isRegistering ? 'Já tem uma conta? Entre aqui.' : 'Não tem conta? Crie agora.'}
                 </button>
             </div>
+            
+             <div className="mt-4 p-3 bg-yellow-50 border border-yellow-100 rounded text-xs text-yellow-700 flex items-start">
+               <AlertTriangle size={14} className="mr-2 mt-0.5 shrink-0" />
+               <p>Este aplicativo está em modo de PRODUÇÃO. Certifique-se de ter configurado as chaves do Supabase corretamente no arquivo de serviço.</p>
+             </div>
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { User, UserRole, Transaction, CollectionBatch, PlasticType, PLAX_TO_BRL_RATE, KG_TO_PLAX_RATE, ESG_CREDIT_PRICE_PER_KG } from '../types';
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 
 export const INSTITUTIONS = [
     { id: 'i1', name: 'Associação de Catadores do Brasil', cause: 'Apoio social aos coletores' },
@@ -9,13 +9,17 @@ export const INSTITUTIONS = [
 ];
 
 class PlaxService {
+  // Alterado para FALSE para forçar o uso do Supabase real
+  private demoMode = false;
   
   // Helper to check configuration
   private checkConfig() {
-      // @ts-ignore - accessing internal property to check for placeholder
-      const url = supabase.supabaseUrl;
-      if (url && url.includes('your-project')) {
-          return "Supabase não configurado. Edite o arquivo services/supabaseClient.ts com suas chaves.";
+      const url = SUPABASE_URL;
+      const key = SUPABASE_ANON_KEY;
+
+      // Se as chaves ainda forem os placeholders ou estiverem vazias, forçamos o erro ou demo
+      if (!url || url.includes('COLE_SUA') || !key || key.includes('COLE_SUA')) {
+          return "Supabase não configurado. Edite o arquivo services/supabaseClient.ts com suas chaves reais.";
       }
       return null;
   }
@@ -24,7 +28,11 @@ class PlaxService {
 
   async getCurrentUser(userId: string): Promise<User | null> {
     const configError = this.checkConfig();
-    if (configError) { console.error(configError); return null; }
+    if (configError) { 
+        console.error(configError); 
+        // Se não tiver config, retorna null para forçar logout ou erro
+        return null; 
+    }
 
     const { data, error } = await supabase
       .from('profiles')
@@ -64,7 +72,6 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { error: configError };
 
-    // Save preference to localStorage to be retrieved after redirect
     if (rolePreference) {
         localStorage.setItem('plax_google_role_pref', rolePreference);
     }
@@ -72,7 +79,7 @@ class PlaxService {
     const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: window.location.origin // Volta para a URL atual após login
+            redirectTo: window.location.origin // Isso enviará para https://plaxrec.vercel.app
         }
     });
 
@@ -83,18 +90,18 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
 
-    // 1. Create Auth User
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-            data: { name, role } // Trigger will handle profile creation
+            data: { name, role }
         }
     });
 
     if (authError) return { user: null, error: authError.message };
-    if (!authData.user) return { user: null, error: 'Erro ao criar usuário.' };
+    if (!authData.user) return { user: null, error: 'Erro ao criar usuário. Verifique seu e-mail para confirmar.' };
 
+    // Retorna um objeto de usuário básico, pois o trigger do Supabase criará o profile assincronamente
     return { user: { id: authData.user.id, name, email, role, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
   }
 
@@ -189,10 +196,9 @@ class PlaxService {
   // --- Actions ---
 
   async registerCollection(recyclerId: string, collectorId: string, weight: number, plasticType: PlasticType) {
+    const plaxAmount = weight * KG_TO_PLAX_RATE;
     const configError = this.checkConfig();
     if (configError) return { success: false, message: configError };
-
-    const plaxAmount = weight * KG_TO_PLAX_RATE;
 
     // 1. Create Batch
     const { error: batchError } = await supabase.from('batches').insert({
@@ -206,10 +212,12 @@ class PlaxService {
 
     if (batchError) return { success: false, message: batchError.message };
 
-    // 2. Update Balances (RPC is better, but doing direct update for MVP)
-    // Collector gets Plax
+    // 2. Update Balances logic is handled by Database Triggers in a real app, 
+    // BUT for this frontend implementation, we will assume the triggers exist or update manually if allowed.
+    // Assuming backend triggers handle the balance updates for safety.
+    
+    // For manual frontend update (less secure but works for prototype):
     await this.updateBalance(collectorId, 'balance_plax', plaxAmount);
-    // Recycler gets Locked Plax
     await this.updateBalance(recyclerId, 'locked_plax', plaxAmount);
 
     // 3. Create Transaction
@@ -225,12 +233,11 @@ class PlaxService {
   }
 
   async emitNFe(recyclerId: string, transformerId: string, weightKg: number, manualNFeId: string) {
+    const plaxToUnlock = weightKg * KG_TO_PLAX_RATE;
     const configError = this.checkConfig();
     if (configError) return { success: false, message: configError };
 
-    const plaxToUnlock = weightKg * KG_TO_PLAX_RATE;
     const recycler = await this.getCurrentUser(recyclerId);
-    
     if (!recycler) return { success: false, message: 'Reciclador não encontrado' };
     if (recycler.lockedPlax < plaxToUnlock) return { success: false, message: `Saldo travado insuficiente.` };
 
@@ -295,34 +302,32 @@ class PlaxService {
       if (configError) return { success: false, message: configError };
 
       await this.updateBalance(userId, 'balance_brl', amount);
-      
       await supabase.from('transactions').insert({
-          type: 'DEPOSIT',
-          amount_brl: amount,
-          description: 'Aporte de Capital ESG',
-          status: 'COMPLETED',
-          to_user_id: userId
+             type: 'DEPOSIT', amount_brl: amount, description: 'Aporte de Capital ESG',
+             status: 'COMPLETED', to_user_id: userId
       });
 
       return { success: true, message: 'Depósito realizado com sucesso.' };
   }
 
   async buyCertifiedLots(buyerId: string, amountBRL: number) {
-      const configError = this.checkConfig();
-      if (configError) return { success: false, message: configError };
-
       const buyer = await this.getCurrentUser(buyerId);
       if (!buyer || buyer.balanceBRL < amountBRL) return { success: false, message: 'Saldo insuficiente. Realize um depósito primeiro.' };
 
-      const { data: availableBatches } = await supabase.from('batches').select('*').eq('status', 'PROCESSED_NFE');
-      if (!availableBatches || availableBatches.length === 0) return { success: false, message: 'Sem lotes disponíveis.' };
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
+      const { data } = await supabase.from('batches').select('*').eq('status', 'PROCESSED_NFE');
+      const availableBatches = data || [];
+
+      if (availableBatches.length === 0) return { success: false, message: 'Sem lotes disponíveis.' };
 
       let remainingMoney = amountBRL;
       let purchasedWeight = 0;
 
       for (const batch of availableBatches) {
           if (remainingMoney <= 0.01) break; 
-          const batchCost = batch.weight_kg * ESG_CREDIT_PRICE_PER_KG;
+          const weight = batch.weight_kg;
+          const batchCost = weight * ESG_CREDIT_PRICE_PER_KG;
 
           if (remainingMoney >= batchCost - 0.01) {
               await supabase.from('batches').update({
@@ -330,15 +335,14 @@ class PlaxService {
                   certified_by_user_id: buyerId,
                   certification_date: new Date().toISOString()
               }).eq('id', batch.id);
-              purchasedWeight += batch.weight_kg;
+              
+              purchasedWeight += weight;
               remainingMoney -= batchCost;
-          } else {
-             continue; 
           }
       }
 
       const totalSpent = amountBRL - remainingMoney;
-      if (totalSpent <= 0) return { success: false, message: 'Não foi possível comprar. Verifique se há lotes inteiros que caibam no valor.' };
+      if (totalSpent <= 0) return { success: false, message: 'Não foi possível comprar.' };
 
       // Update Buyer Balance
       await this.updateBalance(buyerId, 'balance_brl', -totalSpent);
@@ -355,118 +359,82 @@ class PlaxService {
       await this.updateBalance(buyerId, 'balance_brl', esgShare);
 
       await supabase.from('transactions').insert({
-        type: 'ESG_PURCHASE',
-        amount_brl: totalSpent,
-        description: `Compra de ${purchasedWeight.toFixed(2)}kg`,
-        status: 'COMPLETED',
-        from_user_id: buyerId
+        type: 'ESG_PURCHASE', amount_brl: totalSpent, description: `Compra de ${purchasedWeight.toFixed(2)}kg`,
+        status: 'COMPLETED', from_user_id: buyerId
       });
 
       return { success: true, message: `Compra realizada. ${purchasedWeight}kg adquiridos.` };
   }
 
   async reinvest(userId: string, amount: number, institutionId: string) {
-      const configError = this.checkConfig();
-      if (configError) return { success: false, message: configError };
-
       const user = await this.getCurrentUser(userId);
       const institution = INSTITUTIONS.find(i => i.id === institutionId);
       
       if (!user || user.balanceBRL < amount) return { success: false, message: 'Saldo insuficiente.' };
+      
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
 
       await this.updateBalance(userId, 'balance_brl', -amount);
 
       if (institutionId === 'i4') {
-          // Send to Admin
           await this.distributeToRole(UserRole.ADMIN, amount);
       } else {
-          // External + 2% Fee
           const fee = amount * 0.02;
           await this.distributeToRole(UserRole.ADMIN, fee);
       }
 
       await supabase.from('transactions').insert({
-          type: 'TRANSFER',
-          amount_brl: amount,
-          description: `Doação para: ${institution?.name}`,
-          status: 'COMPLETED',
-          from_user_id: userId
+          type: 'TRANSFER', amount_brl: amount, description: `Doação para: ${institution?.name}`,
+          status: 'COMPLETED', from_user_id: userId
       });
 
-      return { success: true, message: 'Doação realizada.' };
+      return { success: true, message: 'Investimento social realizado.' };
   }
-
+  
   async withdraw(userId: string, amount: number, isPlax: boolean) {
-      const configError = this.checkConfig();
-      if (configError) return { success: false, message: configError };
-
       const user = await this.getCurrentUser(userId);
-      if(!user) return { success: false, message: 'Erro usuário' };
-
+      if (!user) return { success: false, message: 'Usuário não encontrado' };
+      
       if (isPlax) {
-          if (user.balancePlax < amount) return { success: false, message: 'Saldo insuficiente' };
-          const valBRL = amount * PLAX_TO_BRL_RATE;
-          const fee = valBRL * 0.02;
-          const net = valBRL - fee;
-
+          if (user.balancePlax < amount) return { success: false, message: 'Saldo Plax insuficiente' };
+          const brlValue = (amount * PLAX_TO_BRL_RATE) * 0.98; // 2% fee
           await this.updateBalance(userId, 'balance_plax', -amount);
-          await this.updateBalance(userId, 'balance_brl', net);
-          await this.distributeToRole(UserRole.ADMIN, fee); // Admin gets fee in BRL
-
-          await supabase.from('transactions').insert({
-            type: 'WITHDRAWAL',
-            amount_plax: amount,
-            amount_brl: net,
-            description: 'Conversão Plax -> Real',
-            status: 'COMPLETED',
-            from_user_id: userId
-          });
-
+          await this.updateBalance(userId, 'balance_brl', brlValue);
       } else {
-          if (user.balanceBRL < amount) return { success: false, message: 'Saldo insuficiente' };
-          const fee = amount * 0.02;
-          const net = amount - fee;
-          
+          if (user.balanceBRL < amount) return { success: false, message: 'Saldo R$ insuficiente' };
           await this.updateBalance(userId, 'balance_brl', -amount);
-          if (user.role !== UserRole.ADMIN) {
-              await this.distributeToRole(UserRole.ADMIN, fee);
-          }
-
-          await supabase.from('transactions').insert({
-            type: 'WITHDRAWAL',
-            amount_brl: net,
-            description: 'Saque Bancário',
-            status: 'COMPLETED',
-            from_user_id: userId
-          });
       }
-      return { success: true, message: 'Saque registrado.' };
+      
+      await supabase.from('transactions').insert({
+          type: 'WITHDRAWAL', 
+          amount_plax: isPlax ? amount : 0,
+          amount_brl: isPlax ? 0 : amount,
+          description: isPlax ? 'Conversão Plax -> R$' : 'Saque Bancário',
+          status: 'COMPLETED', 
+          from_user_id: userId
+      });
+      
+      return { success: true, message: 'Operação realizada com sucesso' };
   }
 
   // --- Helpers ---
 
-  private async updateBalance(userId: string, field: 'balance_plax' | 'balance_brl' | 'locked_plax', amount: number) {
-      // Need to fetch current first to add (Concurrency issue in MVP, in Prod use RPC "increment")
-      const user = await this.getCurrentUser(userId);
-      if (!user) return;
-
-      const mapping = {
-          'balance_plax': user.balancePlax,
-          'balance_brl': user.balanceBRL,
-          'locked_plax': user.lockedPlax
-      };
-      
-      const newVal = mapping[field] + amount;
-      
-      await supabase.from('profiles').update({ [field]: newVal }).eq('id', userId);
+  private async updateBalance(userId: string, field: string, amount: number) {
+      // Get current
+      const { data } = await supabase.from('profiles').select(field).eq('id', userId).single();
+      if (data) {
+          const current = data[field] || 0;
+          await supabase.from('profiles').update({ [field]: current + amount }).eq('id', userId);
+      }
   }
 
-  private async distributeToRole(role: UserRole, amount: number) {
-      // Find first user of role (Simplification)
-      const { data } = await supabase.from('profiles').select('id, balance_brl').eq('role', role).limit(1);
+  private async distributeToRole(role: UserRole, amountTotal: number) {
+      // In a real scenario this divides money among users or sends to a pool.
+      // For this prototype, we send to the FIRST user of that role found.
+      const { data } = await supabase.from('profiles').select('id').eq('role', role).limit(1);
       if (data && data.length > 0) {
-          const u = data[0];
-          await supabase.from('profiles').update({ balance_brl: u.balance_brl + amount }).eq('id', u.id);
+          await this.updateBalance(data[0].id, 'balance_brl', amountTotal);
       }
   }
 }
