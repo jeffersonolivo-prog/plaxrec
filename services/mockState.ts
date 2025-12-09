@@ -124,17 +124,14 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { error: configError };
 
-    // Não passamos mais rolePreference no Google Login. 
-    // O usuário será criado como GUEST (via self-healing ou trigger do banco) e escolherá depois.
+    // Captura a URL base atual do navegador para garantir que o redirecionamento volte para cá
+    const currentOrigin = window.location.origin;
 
     const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: window.location.origin,
-            queryParams: {
-                access_type: 'offline',
-                prompt: 'consent'
-            }
+            redirectTo: currentOrigin,
+            // Removido queryParams (access_type, prompt) para evitar erros de configuração no console do Google
         }
     });
 
