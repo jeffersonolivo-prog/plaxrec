@@ -8,7 +8,6 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publi
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /**
-<<<<<<< HEAD
  * --- SEGURANÇA GITHUB ---
  * 
  * As credenciais (Client ID e Secret) foram removidas deste arquivo porque
@@ -33,19 +32,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
  * 
  * DATABASE SCHEMA (SQL):
  * Execute no SQL Editor do Supabase se ainda não criou as tabelas:
-=======
- * --- INSTRUÇÕES IMPORTANTES DE CONFIGURAÇÃO ---
  * 
- * 1. EMAIL CONFIRMATION:
- *    Se você receber o erro "Email not confirmed", vá no Painel do Supabase -> Authentication -> Providers -> Email
- *    e DESMARQUE a opção "Confirm email". Salve.
- * 
- * 2. DATABASE SCHEMA:
- * 
- * Copie o código SQL abaixo e execute no SQL Editor do Supabase para criar as tabelas necessárias:
->>>>>>> parent of 0917341 (Revisão-5)
- * 
- * -- 1. Tabelas
  * create extension if not exists "uuid-ossp";
  * 
  * create table public.profiles (
@@ -85,7 +72,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
  *   date timestamp with time zone default timezone('utc'::text, now()) not null
  * );
  * 
- * -- 2. Trigger para criar usuário automaticamente
  * create or replace function public.handle_new_user()
  * returns trigger as $$
  * begin
@@ -106,7 +92,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
  *   after insert on auth.users
  *   for each row execute procedure public.handle_new_user();
  * 
- * -- 3. Permissões (RLS) - Simples para MVP
  * alter table public.profiles enable row level security;
  * alter table public.batches enable row level security;
  * alter table public.transactions enable row level security;

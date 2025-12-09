@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import { CollectorView, RecyclerView, TransformerView, ESGView, AdminView } from './views/DashboardViews';
 import WalletView from './views/WalletView';
@@ -7,10 +7,53 @@ import AuthView from './views/AuthView';
 import PlaxAssistant from './components/PlaxAssistant';
 import { User, UserRole } from './types';
 import { plaxService } from './services/mockState';
+import { supabase } from './services/supabaseClient';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('DASHBOARD');
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    // 1. Check active session on load (handles OAuth redirect)
+    const initSession = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+            let user = await plaxService.getCurrentUser(session.user.id);
+            
+            // Check for pending role preference from Google Login redirect
+            const pendingRole = localStorage.getItem('plax_google_role_pref') as UserRole | null;
+            if (pendingRole && user) {
+                // If the user's current role is the default 'COLETOR' but they asked for something else, update it.
+                // Or update it regardless if it was a fresh signup.
+                if (user.role !== pendingRole) {
+                    await plaxService.updateProfileRole(user.id, pendingRole);
+                    user.role = pendingRole; // Optimistic update
+                }
+                localStorage.removeItem('plax_google_role_pref');
+            }
+
+            if (user) {
+                setCurrentUser(user);
+            }
+        }
+        setCheckingSession(false);
+    };
+    initSession();
+
+    // 2. Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+             const user = await plaxService.getCurrentUser(session.user.id);
+             if (user) setCurrentUser(user);
+        } else if (event === 'SIGNED_OUT') {
+            setCurrentUser(null);
+        }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleRefresh = async () => {
     if (currentUser) {
@@ -40,6 +83,17 @@ const App: React.FC = () => {
       default: return <div>Unknown Role</div>;
     }
   };
+
+  if (checkingSession) {
+      return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+              <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-plax-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500">Carregando PlaxRec...</p>
+              </div>
+          </div>
+      )
+  }
 
   if (!currentUser) {
     return <AuthView onLogin={(user) => {

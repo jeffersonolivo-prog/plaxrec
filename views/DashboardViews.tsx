@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, PlasticType, Transaction, CollectionBatch, ESG_CREDIT_PRICE_PER_KG } from '../types';
 import { plaxService, INSTITUTIONS } from '../services/mockState';
-import { ArrowUpRight, ArrowDownLeft, Scale, Truck, ShoppingBag, Landmark, Activity, FileCheck, DollarSign, Download, Leaf, Package, Heart, Printer, Loader2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Scale, Truck, ShoppingBag, Landmark, Activity, FileCheck, DollarSign, Download, Leaf, Package, Heart, Printer, Loader2, Wallet } from 'lucide-react';
 
 interface ViewProps {
   user: User;
@@ -343,6 +343,7 @@ export const TransformerView: React.FC<ViewProps> = ({ user, refresh }) => {
 export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
   const [purchaseAmount, setPurchaseAmount] = useState('');
   const [donateAmount, setDonateAmount] = useState('');
+  const [depositAmount, setDepositAmount] = useState(''); // Estado para o depósito
   const [selectedInst, setSelectedInst] = useState(INSTITUTIONS[0].id);
   const [availableWeight, setAvailableWeight] = useState(0);
   const [myCertificates, setMyCertificates] = useState<CollectionBatch[]>([]);
@@ -358,6 +359,21 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
     }
     load();
   }, [user.id, user.balanceBRL]);
+
+  const handleDeposit = async () => {
+    const val = Number(depositAmount);
+    if(val <= 0) return;
+    setLoading(true);
+    const res = await plaxService.depositBRL(user.id, val);
+    setLoading(false);
+    if(res.success) {
+        alert(res.message);
+        setDepositAmount('');
+        refresh();
+    } else {
+        alert(res.message);
+    }
+  }
 
   const handlePurchase = async () => {
     setLoading(true);
@@ -438,6 +454,39 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
 
   return (
     <div className="space-y-8">
+        
+        {/* NEW: Deposit Section */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center space-x-4">
+                <div className="bg-indigo-100 p-3 rounded-full text-indigo-600">
+                    <Wallet size={24} />
+                </div>
+                <div>
+                    <h3 className="font-bold text-gray-800">Carteira Corporativa</h3>
+                    <p className="text-sm text-gray-500">Saldo atual: <strong className="text-gray-900">R$ {user.balanceBRL.toFixed(2)}</strong></p>
+                </div>
+            </div>
+            <div className="flex-1 max-w-md w-full">
+                <label className="text-xs uppercase font-bold text-gray-400 mb-1 block">Simular Aporte Financeiro</label>
+                <div className="flex gap-2">
+                    <input 
+                        type="number" 
+                        placeholder="Valor R$ (ex: 1000)"
+                        className="flex-1 border rounded-lg px-3 py-2"
+                        value={depositAmount}
+                        onChange={e => setDepositAmount(e.target.value)}
+                    />
+                    <button 
+                        onClick={handleDeposit}
+                        disabled={loading}
+                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 flex items-center"
+                    >
+                        {loading ? <Loader2 className="animate-spin h-4 w-4"/> : 'Depositar'}
+                    </button>
+                </div>
+            </div>
+        </div>
+
         {/* Marketplace Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100">

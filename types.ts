@@ -1,3 +1,4 @@
+
 export enum UserRole {
   COLLECTOR = 'COLETOR',
   RECYCLER = 'RECICLADOR',
@@ -28,7 +29,7 @@ export enum PlasticType {
 export interface Transaction {
   id: string;
   date: string;
-  type: 'COLLECTION' | 'NFE_RELEASE' | 'ESG_PURCHASE' | 'WITHDRAWAL' | 'TRANSFER';
+  type: 'COLLECTION' | 'NFE_RELEASE' | 'ESG_PURCHASE' | 'WITHDRAWAL' | 'TRANSFER' | 'DEPOSIT';
   amountPlax?: number;
   amountBRL?: number;
   description: string;

@@ -60,6 +60,25 @@ class PlaxService {
     return { user: await this.getCurrentUser(authData.user.id) };
   }
 
+  async loginWithGoogle(rolePreference?: UserRole): Promise<{ error?: string }> {
+    const configError = this.checkConfig();
+    if (configError) return { error: configError };
+
+    // Save preference to localStorage to be retrieved after redirect
+    if (rolePreference) {
+        localStorage.setItem('plax_google_role_pref', rolePreference);
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+            redirectTo: window.location.origin // Volta para a URL atual após login
+        }
+    });
+
+    return { error: error?.message };
+  }
+
   async register(name: string, email: string, password: string, role: UserRole): Promise<{ user: User | null, error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
@@ -76,10 +95,13 @@ class PlaxService {
     if (authError) return { user: null, error: authError.message };
     if (!authData.user) return { user: null, error: 'Erro ao criar usuário.' };
 
-    // Wait a moment for trigger or manually fetch
-    // Note: If email confirmation is enabled in Supabase, the user won't be able to login immediately without confirm.
-    // For this MVP, assume "Auto Confirm" is ON in Supabase settings.
     return { user: { id: authData.user.id, name, email, role, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
+  }
+
+  async updateProfileRole(userId: string, role: UserRole) {
+      const configError = this.checkConfig();
+      if (configError) return;
+      await supabase.from('profiles').update({ role: role }).eq('id', userId);
   }
 
   async logout() {
@@ -268,12 +290,29 @@ class PlaxService {
     return { success: true, message: 'NFe processada com sucesso.' };
   }
 
+  async depositBRL(userId: string, amount: number) {
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
+
+      await this.updateBalance(userId, 'balance_brl', amount);
+      
+      await supabase.from('transactions').insert({
+          type: 'DEPOSIT',
+          amount_brl: amount,
+          description: 'Aporte de Capital ESG',
+          status: 'COMPLETED',
+          to_user_id: userId
+      });
+
+      return { success: true, message: 'Depósito realizado com sucesso.' };
+  }
+
   async buyCertifiedLots(buyerId: string, amountBRL: number) {
       const configError = this.checkConfig();
       if (configError) return { success: false, message: configError };
 
       const buyer = await this.getCurrentUser(buyerId);
-      if (!buyer || buyer.balanceBRL < amountBRL) return { success: false, message: 'Saldo insuficiente' };
+      if (!buyer || buyer.balanceBRL < amountBRL) return { success: false, message: 'Saldo insuficiente. Realize um depósito primeiro.' };
 
       const { data: availableBatches } = await supabase.from('batches').select('*').eq('status', 'PROCESSED_NFE');
       if (!availableBatches || availableBatches.length === 0) return { success: false, message: 'Sem lotes disponíveis.' };
@@ -299,7 +338,7 @@ class PlaxService {
       }
 
       const totalSpent = amountBRL - remainingMoney;
-      if (totalSpent <= 0) return { success: false, message: 'Não foi possível comprar.' };
+      if (totalSpent <= 0) return { success: false, message: 'Não foi possível comprar. Verifique se há lotes inteiros que caibam no valor.' };
 
       // Update Buyer Balance
       await this.updateBalance(buyerId, 'balance_brl', -totalSpent);
