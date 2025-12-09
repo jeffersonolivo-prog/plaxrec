@@ -19,10 +19,6 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPass, setRegPass] = useState('');
-  const [regRole, setRegRole] = useState<UserRole>(UserRole.COLLECTOR);
-
-  // Google Login Preference State
-  const [googleRole, setGoogleRole] = useState<UserRole>(UserRole.COLLECTOR);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +35,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
   const handleGoogleLogin = async () => {
       setLoading(true);
-      const { error } = await plaxService.loginWithGoogle(googleRole);
+      const { error } = await plaxService.loginWithGoogle();
       if (error) {
           setLoading(false);
           handleAuthError(error);
@@ -51,7 +47,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     if (!regName || !regEmail || !regPass) return;
     
     setLoading(true);
-    const { user, error } = await plaxService.register(regName, regEmail, regPass, regRole);
+    const { user, error } = await plaxService.register(regName, regEmail, regPass);
     setLoading(false);
     
     if (user) {
@@ -97,21 +93,6 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
             {/* Google Login Section */}
             <div className="mb-6 pb-6 border-b border-gray-100">
-                <div className="mb-2">
-                    <label className="block text-xs text-center text-gray-500 mb-1">Entrar como:</label>
-                    <select 
-                        className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-plax-500"
-                        value={googleRole}
-                        onChange={(e) => setGoogleRole(e.target.value as UserRole)}
-                    >
-                        <option value={UserRole.COLLECTOR}>Coletor</option>
-                        <option value={UserRole.RECYCLER}>Reciclador</option>
-                        <option value={UserRole.TRANSFORMER}>Transformador</option>
-                        <option value={UserRole.ESG_BUYER}>Comprador ESG</option>
-                        <option value={UserRole.ADMIN}>Administrador</option>
-                    </select>
-                </div>
-
                 <button 
                     onClick={handleGoogleLogin} 
                     type="button"
@@ -168,20 +149,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                             onChange={(e) => setRegPass(e.target.value)}
                         />
                     </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tipo de Perfil</label>
-                        <select 
-                            className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-plax-500 focus:outline-none bg-white"
-                            value={regRole}
-                            onChange={(e) => setRegRole(e.target.value as UserRole)}
-                        >
-                            <option value={UserRole.COLLECTOR}>Coletor</option>
-                            <option value={UserRole.RECYCLER}>Reciclador</option>
-                            <option value={UserRole.TRANSFORMER}>Transformador</option>
-                            <option value={UserRole.ESG_BUYER}>Comprador ESG</option>
-                            <option value={UserRole.ADMIN}>Administrador</option>
-                        </select>
-                    </div>
+                    
                     <button type="submit" disabled={loading} className="w-full bg-plax-600 text-white font-bold py-3 rounded-lg hover:bg-plax-700 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50 shadow-md">
                         {loading ? <Loader2 className="animate-spin" /> : <UserPlus size={18} />}
                         <span>{loading ? 'Processando...' : 'Cadastrar'}</span>

@@ -4,6 +4,7 @@ import { CollectorView, RecyclerView, TransformerView, ESGView, AdminView } from
 import WalletView from './views/WalletView';
 import { ReportsView } from './views/ReportsView';
 import AuthView from './views/AuthView';
+import RoleSelectionView from './views/RoleSelectionView';
 import PlaxAssistant from './components/PlaxAssistant';
 import { User, UserRole } from './types';
 import { plaxService } from './services/mockState';
@@ -22,19 +23,6 @@ const App: React.FC = () => {
             
             if (session?.user) {
                 let user = await plaxService.getCurrentUser(session.user.id);
-                
-                // Check for pending role preference from Google Login redirect
-                const pendingRole = localStorage.getItem('plax_google_role_pref') as UserRole | null;
-                if (pendingRole && user) {
-                    // If the user's current role is the default 'COLETOR' but they asked for something else, update it.
-                    // Or update it regardless if it was a fresh signup.
-                    if (user.role !== pendingRole) {
-                        await plaxService.updateProfileRole(user.id, pendingRole);
-                        user.role = pendingRole; // Optimistic update
-                    }
-                    localStorage.removeItem('plax_google_role_pref');
-                }
-
                 if (user) {
                     setCurrentUser(user);
                 }
@@ -42,7 +30,6 @@ const App: React.FC = () => {
         } catch (error) {
             console.error("Erro ao inicializar sessão:", error);
         } finally {
-            // Garante que o loading para, independente do sucesso ou falha
             setCheckingSession(false);
         }
     };
@@ -68,6 +55,18 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRoleSelection = async (role: UserRole) => {
+      if (!currentUser) return;
+      
+      const res = await plaxService.updateProfileRole(currentUser.id, role);
+      if (res?.success) {
+          const updatedUser = { ...currentUser, role };
+          setCurrentUser(updatedUser);
+      } else {
+          alert("Erro ao atualizar perfil: " + (res?.message || "Erro desconhecido"));
+      }
+  };
+
   const renderContent = () => {
     if (!currentUser) return null;
 
@@ -86,7 +85,7 @@ const App: React.FC = () => {
       case UserRole.TRANSFORMER: return <TransformerView user={currentUser} refresh={handleRefresh} />;
       case UserRole.ESG_BUYER: return <ESGView user={currentUser} refresh={handleRefresh} />;
       case UserRole.ADMIN: return <AdminView user={currentUser} refresh={handleRefresh} />;
-      default: return <div>Unknown Role</div>;
+      default: return <div>Carregando dashboard...</div>;
     }
   };
 
@@ -100,6 +99,7 @@ const App: React.FC = () => {
       )
   }
 
+  // Not logged in -> Show Auth View
   if (!currentUser) {
     return <AuthView onLogin={(user) => {
         setCurrentUser(user);
@@ -107,6 +107,12 @@ const App: React.FC = () => {
     }} />;
   }
 
+  // Logged in but Guest -> Show Role Selection
+  if (currentUser.role === UserRole.GUEST) {
+      return <RoleSelectionView userName={currentUser.name} onSelectRole={handleRoleSelection} />;
+  }
+
+  // Logged in and has Role -> Show Main App
   return (
     <Layout 
         currentUser={currentUser} 

@@ -1,5 +1,6 @@
 
 export enum UserRole {
+  GUEST = 'VISITANTE', // Novo usuário que ainda não escolheu perfil
   COLLECTOR = 'COLETOR',
   RECYCLER = 'RECICLADOR',
   TRANSFORMER = 'TRANSFORMADOR',

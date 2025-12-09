@@ -45,29 +45,24 @@ class PlaxService {
                 id: data.id,
                 name: data.name,
                 email: data.email,
-                role: data.role as UserRole,
+                role: (data.role as UserRole) || UserRole.GUEST, // Garante fallback se vier null do banco
                 balancePlax: data.balance_plax || 0,
                 balanceBRL: data.balance_brl || 0,
                 lockedPlax: data.locked_plax || 0
             };
         }
 
-        // 2. Se não encontrou o perfil (Erro comum: Trigger não rodou ou tabela não existe),
-        // Vamos tentar reconstruir o usuário a partir dos dados da Sessão de Auth.
-        // Isso impede o "loop de login" onde o usuário autentica mas não entra.
-        
+        // 2. Se não encontrou o perfil, cria um perfil temporário/automático.
         const { data: authData } = await supabase.auth.getUser();
         const authUser = authData.user;
 
-        // Se o ID da sessão bater com o ID solicitado
         if (authUser && authUser.id === userId) {
-            console.warn("Perfil não encontrado no DB. Tentando criar perfil temporário/automático.");
+            console.warn("Perfil não encontrado no DB. Tentando criar perfil GUEST.");
             
             const meta = authUser.user_metadata || {};
-            // Tenta pegar o nome do metadata, ou do email, ou usa um padrão
-            const fallbackName = meta.name || authUser.email?.split('@')[0] || 'Usuário PlaxRec';
-            // Tenta pegar a role do metadata (google login salva lá), ou usa padrão
-            const fallbackRole = (meta.role as UserRole) || UserRole.COLLECTOR;
+            const fallbackName = meta.name || authUser.email?.split('@')[0] || 'Novo Usuário';
+            // IMPORTANTE: Default agora é GUEST para forçar a tela de seleção
+            const fallbackRole = UserRole.GUEST;
 
             const newProfileData = {
                 id: userId,
@@ -79,16 +74,13 @@ class PlaxService {
                 locked_plax: 0
             };
 
-            // 3. Tenta inserir esse perfil no banco para consertar para a próxima vez (Self-Healing)
-            // Se a tabela 'profiles' não existir, isso vai falhar, mas o 'catch' abaixo garante o login.
+            // 3. Tenta inserir no banco (Self-Healing)
             const { error: insertError } = await supabase.from('profiles').insert(newProfileData);
             
             if (insertError) {
-                console.error("Falha ao criar perfil no DB (possivelmente tabela inexistente). Usando perfil em memória.", insertError);
+                console.error("Falha ao criar perfil no DB. Usando perfil em memória.", insertError);
             }
 
-            // 4. Retorna o objeto de usuário mesmo se a inserção no banco falhou.
-            // Isso garante que o usuário ENTRE no sistema.
             return {
                 id: newProfileData.id,
                 name: newProfileData.name,
@@ -122,27 +114,24 @@ class PlaxService {
 
     const user = await this.getCurrentUser(authData.user.id);
     if (!user) {
-        // Se cair aqui, é porque falhou TUDO (DB e Recuperação de Auth)
         return { user: null, error: 'Falha ao carregar perfil do usuário.' };
     }
 
     return { user };
   }
 
-  async loginWithGoogle(rolePreference?: UserRole): Promise<{ error?: string }> {
+  async loginWithGoogle(): Promise<{ error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { error: configError };
 
-    if (rolePreference) {
-        localStorage.setItem('plax_google_role_pref', rolePreference);
-    }
+    // Não passamos mais rolePreference no Google Login. 
+    // O usuário será criado como GUEST (via self-healing ou trigger do banco) e escolherá depois.
 
     const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
             redirectTo: window.location.origin,
             queryParams: {
-                // Passa o role como metadata para ajudar na criação automática se necessário
                 access_type: 'offline',
                 prompt: 'consent'
             }
@@ -152,45 +141,49 @@ class PlaxService {
     return { error: error?.message };
   }
 
-  async register(name: string, email: string, password: string, role: UserRole): Promise<{ user: User | null, error?: string }> {
+  async register(name: string, email: string, password: string): Promise<{ user: User | null, error?: string }> {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
+
+    // No registro, definimos explicitamente como GUEST
+    const role = UserRole.GUEST;
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-            // Salva nome e role nos metadados do Auth para recuperação futura
             data: { name, role }
         }
     });
 
     if (authError) return { user: null, error: authError.message };
     
-    // Se o usuário foi criado, mas a sessão é nula (aguardando confirmação de email),
-    // retornamos null aqui para que o AuthView mostre a mensagem correta, ou tratamos no AuthView.
-    // Mas para manter compatibilidade com o AuthView atual:
     if (authData.user && !authData.session) {
-         // O AuthView vai receber este usuário mas sem sessão ativa.
-         // O ideal é avisar o usuário para verificar o email.
          return { user: null, error: 'Conta criada! Verifique seu e-mail para confirmar o cadastro antes de entrar.' };
     }
 
     if (!authData.user) return { user: null, error: 'Erro ao criar usuário.' };
 
-    // Retorna um objeto de usuário básico
     return { user: { id: authData.user.id, name, email, role, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
   }
 
   async updateProfileRole(userId: string, role: UserRole) {
       const configError = this.checkConfig();
-      if (configError) return;
+      if (configError) return { success: false, message: configError };
       
-      // Tenta atualizar no perfil
-      await supabase.from('profiles').update({ role: role }).eq('id', userId);
-      
-      // Tenta atualizar no metadata do Auth também para consistência
-      await supabase.auth.updateUser({ data: { role: role } });
+      try {
+          // 1. Atualiza Tabela Profiles
+          const { error } = await supabase.from('profiles').update({ role: role }).eq('id', userId);
+          if (error) throw error;
+
+          // 2. Atualiza Metadata do Auth (opcional, mas bom para consistência)
+          await supabase.auth.updateUser({ data: { role: role } });
+
+          return { success: true };
+      } catch (e: any) {
+          console.error("Erro ao atualizar papel:", e);
+          return { success: false, message: e.message };
+      }
   }
 
   async logout() {
@@ -294,11 +287,7 @@ class PlaxService {
 
     if (batchError) return { success: false, message: batchError.message };
 
-    // 2. Update Balances logic is handled by Database Triggers in a real app, 
-    // BUT for this frontend implementation, we will assume the triggers exist or update manually if allowed.
-    // Assuming backend triggers handle the balance updates for safety.
-    
-    // For manual frontend update (less secure but works for prototype):
+    // 2. Update Balances
     await this.updateBalance(collectorId, 'balance_plax', plaxAmount);
     await this.updateBalance(recyclerId, 'locked_plax', plaxAmount);
 
@@ -323,7 +312,6 @@ class PlaxService {
     if (!recycler) return { success: false, message: 'Reciclador não encontrado' };
     if (recycler.lockedPlax < plaxToUnlock) return { success: false, message: `Saldo travado insuficiente.` };
 
-    // Find batches
     const { data: batches } = await supabase.from('batches').select('*')
         .eq('recycler_id', recyclerId).eq('status', 'RECEIVED');
     
@@ -331,7 +319,6 @@ class PlaxService {
 
     let remainingWeightToProcess = weightKg;
     
-    // Process Batches in DB
     for (const batch of batches) {
         if (remainingWeightToProcess <= 0.001) break;
 
@@ -341,7 +328,6 @@ class PlaxService {
             remainingWeightToProcess -= batch.weight_kg;
         } else {
             const usedWeight = remainingWeightToProcess;
-            // Split: create processed one
             await supabase.from('batches').insert({
                 collector_id: batch.collector_id,
                 recycler_id: batch.recycler_id,
@@ -351,7 +337,6 @@ class PlaxService {
                 status: 'PROCESSED_NFE',
                 nfe_id: manualNFeId
             });
-            // Reduce original
             await supabase.from('batches').update({ 
                 weight_kg: batch.weight_kg - usedWeight,
                 plax_generated: (batch.weight_kg - usedWeight) * KG_TO_PLAX_RATE
@@ -361,12 +346,10 @@ class PlaxService {
         }
     }
 
-    // Update Balances
     await this.updateBalance(recyclerId, 'locked_plax', -plaxToUnlock);
     await this.updateBalance(recyclerId, 'balance_plax', plaxToUnlock);
     await this.updateBalance(transformerId, 'balance_plax', plaxToUnlock);
 
-    // Transaction
     await supabase.from('transactions').insert({
         type: 'NFE_RELEASE',
         amount_plax: plaxToUnlock,
@@ -426,10 +409,8 @@ class PlaxService {
       const totalSpent = amountBRL - remainingMoney;
       if (totalSpent <= 0) return { success: false, message: 'Não foi possível comprar.' };
 
-      // Update Buyer Balance
       await this.updateBalance(buyerId, 'balance_brl', -totalSpent);
 
-      // Distribution
       const collectorShare = totalSpent * 0.15;
       const recyclerShare = totalSpent * 0.30;
       const transformerShare = totalSpent * 0.25;
@@ -503,7 +484,6 @@ class PlaxService {
   // --- Helpers ---
 
   private async updateBalance(userId: string, field: string, amount: number) {
-      // Get current
       const { data } = await supabase.from('profiles').select(field).eq('id', userId).single();
       if (data) {
           const current = data[field] || 0;
@@ -512,8 +492,6 @@ class PlaxService {
   }
 
   private async distributeToRole(role: UserRole, amountTotal: number) {
-      // In a real scenario this divides money among users or sends to a pool.
-      // For this prototype, we send to the FIRST user of that role found.
       const { data } = await supabase.from('profiles').select('id').eq('role', role).limit(1);
       if (data && data.length > 0) {
           await this.updateBalance(data[0].id, 'balance_brl', amountTotal);
