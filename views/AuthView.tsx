@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
-import { Recycle, UserPlus, LogIn, Users, Shield, Loader2 } from 'lucide-react';
+import { Recycle, UserPlus, LogIn, Users, Shield, Loader2, AlertTriangle } from 'lucide-react';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
@@ -30,7 +30,11 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     if (user) {
       onLogin(user);
     } else {
-      alert(error || 'Credenciais inválidas. Se você acabou de configurar o Supabase, crie uma conta nova.');
+      if (error && error.includes('Email not confirmed')) {
+          alert('⚠️ AÇÃO NECESSÁRIA NO SUPABASE ⚠️\n\nO erro "Email not confirmed" ocorreu.\n\nPara corrigir em ambiente de teste:\n1. Vá ao painel do seu projeto Supabase.\n2. Clique em "Authentication" (menu lateral) -> "Providers" -> "Email".\n3. DESMARQUE a opção "Confirm email".\n4. Salve.\n\nAlternativamente, verifique o e-mail cadastrado e clique no link de confirmação.');
+      } else {
+          alert(error || 'Credenciais inválidas. Se você acabou de configurar o Supabase, crie uma conta nova.');
+      }
     }
   };
 
@@ -44,6 +48,8 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     
     if (user) {
       onLogin(user);
+      // Optional: Inform user if email confirmation might be needed despite auto-login mock
+      console.log("Usuário registrado. Se 'Confirm Email' estiver ligado no Supabase, o próximo login falhará sem confirmação.");
     } else {
       alert(error || 'Erro ao criar conta.');
     }
@@ -122,6 +128,9 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                         {loading ? <Loader2 className="animate-spin" /> : <UserPlus size={18} />}
                         <span>{loading ? 'Processando...' : 'Cadastrar'}</span>
                     </button>
+                    <p className="text-xs text-gray-400 text-center mt-2">
+                        Nota: Se o login falhar depois, desative "Confirm Email" no Supabase.
+                    </p>
                 </form>
             ) : (
                 <form onSubmit={handleLogin} className="space-y-4">

@@ -8,7 +8,13 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publi
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /**
- * --- INSTRUÇÕES DE BANCO DE DADOS (DATABASE SCHEMA) ---
+ * --- INSTRUÇÕES IMPORTANTES DE CONFIGURAÇÃO ---
+ * 
+ * 1. EMAIL CONFIRMATION:
+ *    Se você receber o erro "Email not confirmed", vá no Painel do Supabase -> Authentication -> Providers -> Email
+ *    e DESMARQUE a opção "Confirm email". Salve.
+ * 
+ * 2. DATABASE SCHEMA:
  * 
  * Copie o código SQL abaixo e execute no SQL Editor do Supabase para criar as tabelas necessárias:
  * 
