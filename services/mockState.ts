@@ -230,12 +230,47 @@ class PlaxService {
   async getUsers(): Promise<User[]> {
       const configError = this.checkConfig();
       if (configError) return [];
+      
+      // 1. Busca usuários reais do banco
       const { data } = await supabase.from('profiles').select('*');
-      if (!data) return [];
-      return data.map((d: any) => ({
-        id: d.id, name: d.name, email: d.email, role: d.role as UserRole,
-        balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax, avatarUrl: d.avatar_url
-      }));
+      let users: User[] = [];
+      
+      if (data) {
+        users = data.map((d: any) => ({
+            id: d.id, name: d.name, email: d.email, role: d.role as UserRole,
+            balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax, avatarUrl: d.avatar_url
+        }));
+      }
+
+      // 2. Injeta automaticamente as personas virtuais do usuário atual
+      // Isso permite que você se veja nos dropdowns (ex: Reciclador selecionando Coletor)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+          const baseId = session.user.id;
+          const userMetaName = session.user.user_metadata.name || 'Meu Usuário';
+          
+          // Personas para injetar se não existirem no banco
+          const demoRoles = [UserRole.COLLECTOR, UserRole.RECYCLER, UserRole.TRANSFORMER, UserRole.ESG_BUYER];
+          
+          demoRoles.forEach(role => {
+              const virtualId = `${baseId}_${role}`;
+              // Verifica se já não veio do banco
+              if (!users.find(u => u.id === virtualId)) {
+                  users.push({
+                      id: virtualId,
+                      name: `${userMetaName} (${role})`,
+                      email: session.user.email || '',
+                      role: role,
+                      balancePlax: 0,
+                      balanceBRL: 0,
+                      lockedPlax: 0,
+                      avatarUrl: users.find(u => u.id === baseId)?.avatarUrl // Tenta herdar avatar do perfil principal
+                  });
+              }
+          });
+      }
+
+      return users;
   }
 
   async getTransactions(userId?: string): Promise<Transaction[]> {

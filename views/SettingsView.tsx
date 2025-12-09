@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
-import { Save, User as UserIcon, Lock, RefreshCw, Loader2, Image as ImageIcon, AlertTriangle } from 'lucide-react';
+import { Save, User as UserIcon, Lock, RefreshCw, Loader2, Image as ImageIcon, AlertTriangle, Upload } from 'lucide-react';
 
 interface SettingsViewProps {
   user: User;
@@ -41,6 +41,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
     } else {
         alert('Erro: ' + res.message);
     }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              // Convert to base64 string
+              setAvatarUrl(reader.result as string);
+          };
+          reader.readAsDataURL(file);
+      }
   };
 
   const handleChangeRole = async () => {
@@ -94,15 +106,28 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
          <div className="p-6">
              <form onSubmit={handleUpdateProfile} className="space-y-6">
                  <div className="flex flex-col md:flex-row gap-8">
-                     {/* Avatar Preview */}
+                     {/* Avatar Preview & Upload */}
                      <div className="flex flex-col items-center space-y-3">
-                         <div className="h-32 w-32 rounded-full bg-plax-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
+                         <div className="h-32 w-32 rounded-full bg-plax-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative group">
                              {avatarUrl ? (
                                  <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                              ) : (
                                  <span className="text-4xl font-bold text-plax-600">{name.charAt(0)}</span>
                              )}
+                             {/* Overlay on hover for indication */}
+                             <div className="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center text-white text-xs font-bold cursor-pointer">
+                                 Alterar
+                             </div>
                          </div>
+                         <label className="cursor-pointer bg-white border border-gray-300 text-gray-700 px-3 py-1 rounded-full text-xs font-bold hover:bg-gray-50 shadow-sm flex items-center">
+                             <Upload size={12} className="mr-1" /> Carregar Foto
+                             <input 
+                                 type="file" 
+                                 accept="image/*" 
+                                 className="hidden" 
+                                 onChange={handleFileUpload}
+                             />
+                         </label>
                      </div>
 
                      {/* Inputs */}
@@ -130,14 +155,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
 
                          <div>
                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center">
-                                 <ImageIcon size={14} className="mr-1"/> URL da Foto
+                                 <ImageIcon size={14} className="mr-1"/> Foto de Perfil (Arquivo Local)
                              </label>
-                             <input 
-                                 type="text" 
-                                 className="w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-plax-500 outline-none"
-                                 value={avatarUrl}
-                                 onChange={e => setAvatarUrl(e.target.value)}
-                             />
+                             <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    disabled
+                                    placeholder="Selecione um arquivo acima..."
+                                    className="w-full border rounded-lg px-4 py-2 bg-gray-50 text-gray-400 cursor-not-allowed"
+                                    value={avatarUrl ? (avatarUrl.startsWith('data:') ? 'Imagem carregada' : avatarUrl) : ''}
+                                />
+                             </div>
+                             <p className="text-[10px] text-gray-400 mt-1">A imagem será salva no seu perfil do navegador e banco de dados.</p>
                          </div>
                      </div>
                  </div>
