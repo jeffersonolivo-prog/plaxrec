@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { User } from '../types';
+import React, { useState, useEffect } from 'react';
+import { User, Transaction } from '../types';
 import { plaxService } from '../services/mockState';
-import { Wallet, TrendingUp, TrendingDown, Clock, DollarSign } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, Clock, DollarSign, Loader2 } from 'lucide-react';
 
 interface WalletViewProps {
   user: User;
@@ -12,11 +12,16 @@ interface WalletViewProps {
 const WithdrawalSection: React.FC<{ user: User; refresh: () => void }> = ({ user, refresh }) => {
     const [amount, setAmount] = useState('');
     const [currency, setCurrency] = useState<'PLAX' | 'BRL'>('BRL');
+    const [loading, setLoading] = useState(false);
 
-    const handleWithdraw = () => {
+    const handleWithdraw = async () => {
         const val = Number(amount);
         if (val <= 0) return;
-        const res = plaxService.withdraw(user.id, val, currency === 'PLAX');
+        
+        setLoading(true);
+        const res = await plaxService.withdraw(user.id, val, currency === 'PLAX');
+        setLoading(false);
+
         if (res.success) {
             alert(res.message);
             setAmount('');
@@ -41,8 +46,12 @@ const WithdrawalSection: React.FC<{ user: User; refresh: () => void }> = ({ user
                     value={amount}
                     onChange={e => setAmount(e.target.value)}
                 />
-                <button onClick={handleWithdraw} className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 font-medium">
-                    Sacar
+                <button 
+                    onClick={handleWithdraw} 
+                    disabled={loading}
+                    className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 font-medium flex items-center justify-center"
+                >
+                    {loading ? <Loader2 className="animate-spin h-5 w-5" /> : 'Sacar'}
                 </button>
             </div>
             <p className="text-xs text-gray-400 mt-2">
@@ -54,7 +63,11 @@ const WithdrawalSection: React.FC<{ user: User; refresh: () => void }> = ({ user
 }
 
 const WalletView: React.FC<WalletViewProps> = ({ user, refresh }) => {
-  const transactions = plaxService.getTransactions(user.id);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+
+  useEffect(() => {
+    plaxService.getTransactions(user.id).then(setTransactions);
+  }, [user.id, user.balancePlax, user.balanceBRL]);
 
   return (
     <div className="space-y-6">

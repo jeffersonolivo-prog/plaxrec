@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 import { plaxService } from '../services/mockState';
-import { Recycle, UserPlus, LogIn, Users, Shield } from 'lucide-react';
+import { Recycle, UserPlus, LogIn, Users, Shield, Loader2 } from 'lucide-react';
 
 interface AuthViewProps {
   onLogin: (user: User) => void;
@@ -9,6 +9,7 @@ interface AuthViewProps {
 
 const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const [isRegistering, setIsRegistering] = useState(false);
+  const [loading, setLoading] = useState(false);
   
   // Login State
   const [loginEmail, setLoginEmail] = useState('');
@@ -20,33 +21,31 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const [regPass, setRegPass] = useState('');
   const [regRole, setRegRole] = useState<UserRole>(UserRole.COLLECTOR);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = plaxService.login(loginEmail, loginPass);
+    setLoading(true);
+    const { user, error } = await plaxService.login(loginEmail, loginPass);
+    setLoading(false);
+    
     if (user) {
       onLogin(user);
     } else {
-      alert('Credenciais inválidas. Verifique os botões de acesso rápido abaixo.');
+      alert(error || 'Credenciais inválidas. Se você acabou de configurar o Supabase, crie uma conta nova.');
     }
   };
 
-  const quickLogin = (email: string, pass: string) => {
-      setLoginEmail(email);
-      setLoginPass(pass);
-      // Optional: Auto-submit
-      // const user = plaxService.login(email, pass);
-      // if (user) onLogin(user);
-  };
-
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!regName || !regEmail || !regPass) return;
     
-    const user = plaxService.register(regName, regEmail, regPass, regRole);
+    setLoading(true);
+    const { user, error } = await plaxService.register(regName, regEmail, regPass, regRole);
+    setLoading(false);
+    
     if (user) {
       onLogin(user);
     } else {
-      alert('Erro ao criar conta. Email pode já existir.');
+      alert(error || 'Erro ao criar conta.');
     }
   };
 
@@ -116,34 +115,19 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                             <option value={UserRole.RECYCLER}>Reciclador</option>
                             <option value={UserRole.TRANSFORMER}>Transformador</option>
                             <option value={UserRole.ESG_BUYER}>Comprador ESG</option>
+                            <option value={UserRole.ADMIN}>Administrador (Sistema)</option>
                         </select>
                     </div>
-                    <button type="submit" className="w-full bg-plax-600 text-white font-bold py-3 rounded-lg hover:bg-plax-700 transition-colors flex items-center justify-center space-x-2">
-                        <UserPlus size={18} />
-                        <span>Cadastrar</span>
+                    <button type="submit" disabled={loading} className="w-full bg-plax-600 text-white font-bold py-3 rounded-lg hover:bg-plax-700 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50">
+                        {loading ? <Loader2 className="animate-spin" /> : <UserPlus size={18} />}
+                        <span>{loading ? 'Processando...' : 'Cadastrar'}</span>
                     </button>
                 </form>
             ) : (
                 <form onSubmit={handleLogin} className="space-y-4">
                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4">
-                        <p className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center"><Users size={14} className="mr-1"/> Acesso Rápido (Simulação)</p>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button type="button" onClick={() => quickLogin('joao@plaxrec.com', '123')} className="text-xs bg-white border border-gray-300 px-2 py-1 rounded hover:bg-gray-100 text-left">
-                                🧑‍🌾 Coletor
-                            </button>
-                            <button type="button" onClick={() => quickLogin('contato@ecorecicla.com', '123')} className="text-xs bg-white border border-gray-300 px-2 py-1 rounded hover:bg-gray-100 text-left">
-                                ♻️ Reciclador
-                            </button>
-                            <button type="button" onClick={() => quickLogin('compras@industria.com', '123')} className="text-xs bg-white border border-gray-300 px-2 py-1 rounded hover:bg-gray-100 text-left">
-                                🏭 Transformador
-                            </button>
-                            <button type="button" onClick={() => quickLogin('esg@greencorp.com', '123')} className="text-xs bg-green-50 border border-green-200 text-green-700 px-2 py-1 rounded hover:bg-green-100 text-left font-semibold">
-                                🌍 Comprador ESG
-                            </button>
-                            <button type="button" onClick={() => quickLogin('admin@plaxrec.com', 'admin')} className="col-span-2 mt-1 text-xs bg-gray-800 text-white border border-gray-900 px-2 py-1.5 rounded hover:bg-gray-700 text-center font-bold flex items-center justify-center">
-                                <Shield size={12} className="mr-1.5" /> Acesso Administrativo (Admin)
-                            </button>
-                        </div>
+                        <p className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center"><Users size={14} className="mr-1"/> Acesso Rápido</p>
+                        <p className="text-xs text-gray-400 mb-2">Preencha os campos abaixo com suas credenciais do banco de dados.</p>
                     </div>
 
                     <div>
@@ -168,9 +152,9 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                             onChange={(e) => setLoginPass(e.target.value)}
                         />
                     </div>
-                    <button type="submit" className="w-full bg-plax-600 text-white font-bold py-3 rounded-lg hover:bg-plax-700 transition-colors flex items-center justify-center space-x-2">
-                        <LogIn size={18} />
-                        <span>Entrar</span>
+                    <button type="submit" disabled={loading} className="w-full bg-plax-600 text-white font-bold py-3 rounded-lg hover:bg-plax-700 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50">
+                        {loading ? <Loader2 className="animate-spin" /> : <LogIn size={18} />}
+                        <span>{loading ? 'Entrando...' : 'Entrar'}</span>
                     </button>
                 </form>
             )}

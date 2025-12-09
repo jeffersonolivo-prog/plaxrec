@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserRole, PlasticType, Transaction, CollectionBatch, ESG_CREDIT_PRICE_PER_KG } from '../types';
 import { plaxService, INSTITUTIONS } from '../services/mockState';
-import { ArrowUpRight, ArrowDownLeft, Scale, Truck, ShoppingBag, Landmark, Activity, FileCheck, DollarSign, Download, Leaf, Package, Heart, Printer } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { ArrowUpRight, ArrowDownLeft, Scale, Truck, ShoppingBag, Landmark, Activity, FileCheck, DollarSign, Download, Leaf, Package, Heart, Printer, Loader2 } from 'lucide-react';
 
 interface ViewProps {
   user: User;
@@ -13,11 +12,14 @@ interface ViewProps {
 export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ user, refresh }) => {
     const [amount, setAmount] = useState('');
     const [currency, setCurrency] = useState<'PLAX' | 'BRL'>('BRL');
+    const [loading, setLoading] = useState(false);
 
-    const handleWithdraw = () => {
+    const handleWithdraw = async () => {
         const val = Number(amount);
         if (val <= 0) return;
-        const res = plaxService.withdraw(user.id, val, currency === 'PLAX');
+        setLoading(true);
+        const res = await plaxService.withdraw(user.id, val, currency === 'PLAX');
+        setLoading(false);
         if (res.success) {
             alert(res.message);
             setAmount('');
@@ -42,8 +44,8 @@ export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ 
                     value={amount}
                     onChange={e => setAmount(e.target.value)}
                 />
-                <button onClick={handleWithdraw} className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 font-medium w-full sm:w-auto">
-                    Sacar
+                <button onClick={handleWithdraw} disabled={loading} className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 font-medium w-full sm:w-auto flex justify-center items-center">
+                    {loading ? <Loader2 className="animate-spin h-4 w-4" /> : 'Sacar'}
                 </button>
             </div>
             <p className="text-xs text-gray-400 mt-2">
@@ -56,7 +58,11 @@ export const WithdrawalCard: React.FC<{ user: User; refresh: () => void }> = ({ 
 
 // --- COLLECTOR VIEW ---
 export const CollectorView: React.FC<ViewProps> = ({ user, refresh }) => {
-  const transactions = plaxService.getTransactions(user.id);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  
+  useEffect(() => {
+    plaxService.getTransactions(user.id).then(setTransactions);
+  }, [user.id, user.balanceBRL]); // Refresh when balance changes likely implies transaction
   
   return (
     <div className="space-y-6">
@@ -114,29 +120,51 @@ export const CollectorView: React.FC<ViewProps> = ({ user, refresh }) => {
 // --- RECYCLER VIEW ---
 export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
   const [weight, setWeight] = useState('');
-  const [collectorId, setCollectorId] = useState('u1'); 
+  const [collectorId, setCollectorId] = useState('');
+  const [collectors, setCollectors] = useState<User[]>([]);
+  const [transformers, setTransformers] = useState<User[]>([]);
   const [plasticType, setPlasticType] = useState<PlasticType>(PlasticType.PET);
   const [nfeWeight, setNfeWeight] = useState('');
   const [nfeNumber, setNfeNumber] = useState('');
-  const [transformerId, setTransformerId] = useState('u3');
-  
-  // Get pending inventory (RECEIVED status)
-  const pendingBatches = plaxService.getBatches('RECEIVED').filter(b => b.recyclerId === user.id);
+  const [transformerId, setTransformerId] = useState('');
+  const [pendingBatches, setPendingBatches] = useState<CollectionBatch[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+      const load = async () => {
+          const allUsers = await plaxService.getUsers();
+          const cols = allUsers.filter(u => u.role === UserRole.COLLECTOR);
+          const trans = allUsers.filter(u => u.role === UserRole.TRANSFORMER);
+          setCollectors(cols);
+          setTransformers(trans);
+          if (cols.length > 0) setCollectorId(cols[0].id);
+          if (trans.length > 0) setTransformerId(trans[0].id);
+
+          const batches = await plaxService.getBatches('RECEIVED');
+          setPendingBatches(batches.filter(b => b.recyclerId === user.id));
+      };
+      load();
+  }, [user.id, user.balancePlax]); // Reload when balance updates (implies action taken)
+
   const totalPendingWeight = pendingBatches.reduce((acc, b) => acc + b.weightKg, 0);
 
-  const handleRegister = () => {
-    plaxService.registerCollection(user.id, collectorId, Number(weight), plasticType);
+  const handleRegister = async () => {
+    setLoading(true);
+    await plaxService.registerCollection(user.id, collectorId, Number(weight), plasticType);
+    setLoading(false);
     alert('Coleta registrada! Créditos gerados para o Coletor e Travados para você.');
     setWeight('');
     refresh();
   };
 
-  const handleEmitNFe = () => {
+  const handleEmitNFe = async () => {
     if(!nfeNumber.trim()) {
         alert("Digite o número da NFe.");
         return;
     }
-    const res = plaxService.emitNFe(user.id, transformerId, Number(nfeWeight), nfeNumber);
+    setLoading(true);
+    const res = await plaxService.emitNFe(user.id, transformerId, Number(nfeWeight), nfeNumber);
+    setLoading(false);
     alert(res.message);
     if (res.success) {
       setNfeWeight('');
@@ -155,7 +183,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
              <div>
                <label className="text-xs font-semibold text-gray-500 uppercase">Coletor</label>
                <select className="w-full border p-2 rounded bg-gray-50" value={collectorId} onChange={(e) => setCollectorId(e.target.value)}>
-                 {plaxService.getUsers().filter(u => u.role === UserRole.COLLECTOR).map(c => (
+                 {collectors.map(c => (
                    <option key={c.id} value={c.id}>{c.name}</option>
                  ))}
                </select>
@@ -170,7 +198,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
                <label className="text-xs font-semibold text-gray-500 uppercase">Peso (kg)</label>
                <input type="number" className="w-full border p-2 rounded" value={weight} onChange={e => setWeight(e.target.value)} />
              </div>
-             <button onClick={handleRegister} className="w-full bg-plax-600 text-white py-2 rounded hover:bg-plax-700">Registrar Entrada</button>
+             <button onClick={handleRegister} disabled={loading} className="w-full bg-plax-600 text-white py-2 rounded hover:bg-plax-700 flex justify-center">{loading ? <Loader2 className="animate-spin"/> : 'Registrar Entrada'}</button>
            </div>
         </div>
 
@@ -185,7 +213,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
              <div>
                <label className="text-xs font-semibold text-gray-500 uppercase">Transformador (Comprador do Lote)</label>
                <select className="w-full border p-2 rounded bg-gray-50" value={transformerId} onChange={(e) => setTransformerId(e.target.value)}>
-                 {plaxService.getUsers().filter(u => u.role === UserRole.TRANSFORMER).map(c => (
+                 {transformers.map(c => (
                    <option key={c.id} value={c.id}>{c.name}</option>
                  ))}
                </select>
@@ -210,7 +238,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
                   placeholder={`Max: ${totalPendingWeight} kg`}
                />
              </div>
-             <button onClick={handleEmitNFe} className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Validar NFe & Destravar</button>
+             <button onClick={handleEmitNFe} disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 flex justify-center">{loading ? <Loader2 className="animate-spin"/> : 'Validar NFe & Destravar'}</button>
            </div>
         </div>
         
@@ -250,7 +278,7 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
                 <tbody>
                     {pendingBatches.map(b => (
                         <tr key={b.id} className="border-b">
-                            <td className="px-6 py-4 whitespace-nowrap">{b.id}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{b.id.substr(0,8)}...</td>
                             <td className="px-6 py-4 font-bold whitespace-nowrap">{b.weightKg} kg</td>
                             <td className="px-6 py-4 whitespace-nowrap">{b.plasticType}</td>
                             <td className="px-6 py-4 whitespace-nowrap"><span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">Aguardando NFe</span></td>
@@ -269,7 +297,11 @@ export const RecyclerView: React.FC<ViewProps> = ({ user, refresh }) => {
 
 // --- TRANSFORMER VIEW ---
 export const TransformerView: React.FC<ViewProps> = ({ user, refresh }) => {
-    const transactions = plaxService.getTransactions(user.id);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    useEffect(() => {
+        plaxService.getTransactions(user.id).then(setTransactions);
+    }, [user.id, user.balancePlax]);
+
     return (
         <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -312,13 +344,25 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
   const [purchaseAmount, setPurchaseAmount] = useState('');
   const [donateAmount, setDonateAmount] = useState('');
   const [selectedInst, setSelectedInst] = useState(INSTITUTIONS[0].id);
+  const [availableWeight, setAvailableWeight] = useState(0);
+  const [myCertificates, setMyCertificates] = useState<CollectionBatch[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const availableBatches = plaxService.getBatches('PROCESSED_NFE');
-  const myCertificates = plaxService.getCertifiedBatches(user.id);
-  const availableWeight = availableBatches.reduce((acc, b) => acc + b.weightKg, 0);
+  useEffect(() => {
+    const load = async () => {
+        const batches = await plaxService.getBatches('PROCESSED_NFE');
+        setAvailableWeight(batches.reduce((acc, b) => acc + b.weightKg, 0));
+        
+        const certs = await plaxService.getCertifiedBatches(user.id);
+        setMyCertificates(certs);
+    }
+    load();
+  }, [user.id, user.balanceBRL]);
 
-  const handlePurchase = () => {
-    const res = plaxService.buyCertifiedLots(user.id, Number(purchaseAmount));
+  const handlePurchase = async () => {
+    setLoading(true);
+    const res = await plaxService.buyCertifiedLots(user.id, Number(purchaseAmount));
+    setLoading(false);
     if(res.success) {
         alert(res.message);
         setPurchaseAmount('');
@@ -328,8 +372,10 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
     }
   };
 
-  const handleDonation = () => {
-      const res = plaxService.reinvest(user.id, Number(donateAmount), selectedInst);
+  const handleDonation = async () => {
+      setLoading(true);
+      const res = await plaxService.reinvest(user.id, Number(donateAmount), selectedInst);
+      setLoading(false);
       if(res.success) {
           alert(res.message);
           setDonateAmount('');
@@ -361,7 +407,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
                 <div class="sub">Plataforma PlaxRec de Economia Circular</div>
                 
                 <div class="content">
-                  <p>Certificamos que a empresa <span class="highlight">${user.name}</span> adquiriu e aposentou os créditos de reciclagem referentes ao lote <span class="highlight">#${batch.id}</span>.</p>
+                  <p>Certificamos que a empresa <span class="highlight">${user.name}</span> adquiriu e aposentou os créditos de reciclagem referentes ao lote <span class="highlight">#${batch.id.substr(0,8)}</span>.</p>
                   
                   <p>
                     <strong>Detalhes da Rastreabilidade:</strong><br/>
@@ -423,9 +469,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
                             Estimativa: {Number(purchaseAmount) > 0 ? (Number(purchaseAmount) / ESG_CREDIT_PRICE_PER_KG).toFixed(1) : 0} kg de créditos.
                         </p>
                     </div>
-                    <button onClick={handlePurchase} className="w-full md:w-auto bg-green-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-green-700 shadow-md transition-transform active:scale-95">
-                        Comprar Créditos
-                    </button>
+                    <button onClick={handlePurchase} disabled={loading} className="w-full md:w-auto bg-green-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-green-700 shadow-md transition-transform active:scale-95 flex justify-center">{loading ? <Loader2 className="animate-spin"/> : 'Comprar Créditos'}</button>
             </div>
             <div className="mt-4 text-xs text-gray-400">
                 * Ao comprar créditos, 30% do valor retorna para sua carteira para reinvestimento social obrigatório.
@@ -459,9 +503,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
                     />
                  </div>
                  <div className="text-right text-xs text-gray-400">Saldo Disp: R$ {user.balanceBRL.toFixed(2)}</div>
-                 <button onClick={handleDonation} className="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 rounded transition-colors">
-                     Realizar Doação
-                 </button>
+                 <button onClick={handleDonation} disabled={loading} className="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 rounded transition-colors flex justify-center">{loading ? <Loader2 className="animate-spin"/> : 'Realizar Doação'}</button>
              </div>
           </div>
       </div>
@@ -486,7 +528,7 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
                    <tbody>
                        {myCertificates.map(batch => (
                            <tr key={batch.id} className="border-b hover:bg-gray-50">
-                               <td className="px-6 py-4 font-mono whitespace-nowrap">{batch.id}</td>
+                               <td className="px-6 py-4 font-mono whitespace-nowrap">{batch.id.substr(0,8)}...</td>
                                <td className="px-6 py-4 whitespace-nowrap">{new Date(batch.certificationDate!).toLocaleDateString()}</td>
                                <td className="px-6 py-4 font-mono text-xs whitespace-nowrap">{batch.nfeId}</td>
                                <td className="px-6 py-4 font-bold whitespace-nowrap">{batch.weightKg.toFixed(2)} kg</td>
@@ -514,6 +556,12 @@ export const ESGView: React.FC<ViewProps> = ({ user, refresh }) => {
 
 // --- ADMIN VIEW ---
 export const AdminView: React.FC<ViewProps> = ({ user, refresh }) => {
+    const [users, setUsers] = useState<User[]>([]);
+
+    useEffect(() => {
+        plaxService.getUsers().then(setUsers);
+    }, [user.balanceBRL]);
+
     return (
         <div className="space-y-6">
             <div className="bg-gray-800 text-white p-8 rounded-xl shadow-lg relative overflow-hidden">
@@ -559,7 +607,7 @@ export const AdminView: React.FC<ViewProps> = ({ user, refresh }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {plaxService.getUsers().map(u => (
+                                {users.map(u => (
                                     <tr key={u.id} className="border-b">
                                         <td className="p-3 font-medium whitespace-nowrap">{u.name}</td>
                                         <td className="p-3 whitespace-nowrap"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-bold">{u.role}</span></td>

@@ -12,9 +12,9 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('DASHBOARD');
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     if (currentUser) {
-        const updated = plaxService.getUser(currentUser.id);
+        const updated = await plaxService.getCurrentUser(currentUser.id);
         if (updated) setCurrentUser({...updated});
     }
   };

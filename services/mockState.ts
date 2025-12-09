@@ -1,29 +1,5 @@
 import { User, UserRole, Transaction, CollectionBatch, PlasticType, PLAX_TO_BRL_RATE, KG_TO_PLAX_RATE, ESG_CREDIT_PRICE_PER_KG } from '../types';
-
-interface StoredUser extends User {
-  password?: string;
-}
-
-// Initial Mock Data
-const INITIAL_USERS: StoredUser[] = [
-  { id: 'u1', name: 'João Coletor', email: 'joao@plaxrec.com', password: '123', role: UserRole.COLLECTOR, balancePlax: 150, balanceBRL: 50.00, lockedPlax: 0 },
-  { id: 'u2', name: 'EcoRecicla Ltda', email: 'contato@ecorecicla.com', password: '123', role: UserRole.RECYCLER, balancePlax: 5000, balanceBRL: 12000.00, lockedPlax: 5000 }, 
-  { id: 'u3', name: 'Indústria Plástica BR', email: 'compras@industria.com', password: '123', role: UserRole.TRANSFORMER, balancePlax: 2000, balanceBRL: 50000.00, lockedPlax: 0 },
-  { id: 'u4', name: 'GreenCorp ESG', email: 'esg@greencorp.com', password: '123', role: UserRole.ESG_BUYER, balancePlax: 0, balanceBRL: 500000.00, lockedPlax: 0 },
-  { id: 'u5', name: 'PlaxRec Admin', email: 'admin@plaxrec.com', password: 'admin', role: UserRole.ADMIN, balancePlax: 0, balanceBRL: 4500.00, lockedPlax: 0 },
-];
-
-const INITIAL_TRANSACTIONS: Transaction[] = [];
-
-// Pre-seed batches
-const INITIAL_BATCHES: CollectionBatch[] = [
-    // Lotes já processados (Disponíveis para COMPRADOR ESG comprar agora)
-    { id: 'b1', collectorId: 'u1', recyclerId: 'u2', weightKg: 100, plasticType: PlasticType.PET, plaxGenerated: 1000, date: new Date().toISOString(), status: 'PROCESSED_NFE', nfeId: '35240100001' },
-    { id: 'b2', collectorId: 'u1', recyclerId: 'u2', weightKg: 50, plasticType: PlasticType.HDPE, plaxGenerated: 500, date: new Date().toISOString(), status: 'PROCESSED_NFE', nfeId: '35240100002' },
-    
-    // Lote pendente (Disponível para RECICLADOR emitir NFe agora)
-    { id: 'b3', collectorId: 'u1', recyclerId: 'u2', weightKg: 500, plasticType: PlasticType.PP, plaxGenerated: 5000, date: new Date().toISOString(), status: 'RECEIVED' }
-];
+import { supabase } from './supabaseClient';
 
 export const INSTITUTIONS = [
     { id: 'i1', name: 'Associação de Catadores do Brasil', cause: 'Apoio social aos coletores' },
@@ -33,320 +9,426 @@ export const INSTITUTIONS = [
 ];
 
 class PlaxService {
-  private users: StoredUser[] = [...INITIAL_USERS];
-  private transactions: Transaction[] = [...INITIAL_TRANSACTIONS];
-  private batches: CollectionBatch[] = [...INITIAL_BATCHES];
-
-  getUsers() { return this.users; }
-  getUser(id: string) { return this.users.find(u => u.id === id); }
   
-  login(email: string, password: string): User | null {
-    const user = this.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (!user) return null;
-    const { password: _, ...safeUser } = user;
-    return safeUser;
+  // Helper to check configuration
+  private checkConfig() {
+      // @ts-ignore - accessing internal property to check for placeholder
+      const url = supabase.supabaseUrl;
+      if (url && url.includes('your-project')) {
+          return "Supabase não configurado. Edite o arquivo services/supabaseClient.ts com suas chaves.";
+      }
+      return null;
   }
 
-  register(name: string, email: string, password: string, role: UserRole): User | null {
-    if (this.users.find(u => u.email === email)) return null;
-    const newUser: StoredUser = {
-      id: Math.random().toString(36).substr(2, 9),
-      name, email, password, role,
-      balancePlax: 0, balanceBRL: 0, lockedPlax: 0
+  // --- Auth & User ---
+
+  async getCurrentUser(userId: string): Promise<User | null> {
+    const configError = this.checkConfig();
+    if (configError) { console.error(configError); return null; }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    
+    if (error || !data) return null;
+
+    return {
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        role: data.role as UserRole,
+        balancePlax: data.balance_plax,
+        balanceBRL: data.balance_brl,
+        lockedPlax: data.locked_plax
     };
-    this.users.push(newUser);
-    const { password: _, ...safeUser } = newUser;
-    return safeUser;
   }
+  
+  async login(email: string, password: string): Promise<{ user: User | null, error?: string }> {
+    const configError = this.checkConfig();
+    if (configError) return { user: null, error: configError };
 
-  getTransactions(userId?: string) {
-    if (!userId) return this.transactions;
-    return this.transactions.filter(t => t.fromUserId === userId || t.toUserId === userId || (!t.fromUserId && !t.toUserId));
-  }
-
-  getBatches(status?: string) {
-      if(status) return this.batches.filter(b => b.status === status);
-      return this.batches;
-  }
-
-  getCertifiedBatches(buyerId: string) {
-      return this.batches.filter(b => b.certifiedByUserId === buyerId);
-  }
-
-  // 1. Collector delivers to Recycler
-  registerCollection(recyclerId: string, collectorId: string, weight: number, plasticType: PlasticType) {
-    const plaxAmount = weight * KG_TO_PLAX_RATE;
-    const collector = this.users.find(u => u.id === collectorId);
-    if (collector) collector.balancePlax += plaxAmount;
-
-    const recycler = this.users.find(u => u.id === recyclerId);
-    if (recycler) recycler.lockedPlax += plaxAmount;
-
-    const batch: CollectionBatch = {
-      id: Math.random().toString(36).substr(2, 9),
-      collectorId, recyclerId, weightKg: weight, plasticType,
-      plaxGenerated: plaxAmount, date: new Date().toISOString(), status: 'RECEIVED'
-    };
-    this.batches.push(batch);
-
-    this.transactions.unshift({
-      id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'COLLECTION',
-      amountPlax: plaxAmount, description: `Coleta: ${weight}kg ${plasticType}`, status: 'COMPLETED', toUserId: collectorId
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password
     });
+
+    if (authError) return { user: null, error: authError.message };
+    if (!authData.user) return { user: null, error: 'Erro desconhecido' };
+
+    return { user: await this.getCurrentUser(authData.user.id) };
+  }
+
+  async register(name: string, email: string, password: string, role: UserRole): Promise<{ user: User | null, error?: string }> {
+    const configError = this.checkConfig();
+    if (configError) return { user: null, error: configError };
+
+    // 1. Create Auth User
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+            data: { name, role } // Trigger will handle profile creation
+        }
+    });
+
+    if (authError) return { user: null, error: authError.message };
+    if (!authData.user) return { user: null, error: 'Erro ao criar usuário.' };
+
+    // Wait a moment for trigger or manually fetch
+    // Note: If email confirmation is enabled in Supabase, the user won't be able to login immediately without confirm.
+    // For this MVP, assume "Auto Confirm" is ON in Supabase settings.
+    return { user: { id: authData.user.id, name, email, role, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
+  }
+
+  async logout() {
+      await supabase.auth.signOut();
+  }
+
+  // --- Data Fetching ---
+
+  async getUsers(): Promise<User[]> {
+      const configError = this.checkConfig();
+      if (configError) return [];
+
+      const { data } = await supabase.from('profiles').select('*');
+      if (!data) return [];
+      return data.map((d: any) => ({
+        id: d.id, name: d.name, email: d.email, role: d.role as UserRole,
+        balancePlax: d.balance_plax, balanceBRL: d.balance_brl, lockedPlax: d.locked_plax
+      }));
+  }
+
+  async getTransactions(userId?: string): Promise<Transaction[]> {
+    const configError = this.checkConfig();
+    if (configError) return [];
+
+    let query = supabase.from('transactions').select('*').order('date', { ascending: false });
+    
+    if (userId) {
+        query = query.or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`);
+    }
+
+    const { data } = await query;
+    if (!data) return [];
+    
+    return data.map((t: any) => ({
+        id: t.id,
+        date: t.date,
+        type: t.type,
+        amountPlax: t.amount_plax,
+        amountBRL: t.amount_brl,
+        description: t.description,
+        status: t.status,
+        fromUserId: t.from_user_id,
+        toUserId: t.to_user_id
+    }));
+  }
+
+  async getBatches(status?: string): Promise<CollectionBatch[]> {
+      const configError = this.checkConfig();
+      if (configError) return [];
+
+      let query = supabase.from('batches').select('*').order('created_at', { ascending: false });
+      if (status) query = query.eq('status', status);
+
+      const { data } = await query;
+      if (!data) return [];
+
+      return data.map((b: any) => ({
+          id: b.id,
+          collectorId: b.collector_id,
+          recyclerId: b.recycler_id,
+          weightKg: b.weight_kg,
+          plasticType: b.plastic_type,
+          plaxGenerated: b.plax_generated,
+          date: b.created_at,
+          status: b.status,
+          nfeId: b.nfe_id,
+          certifiedByUserId: b.certified_by_user_id,
+          certificationDate: b.certification_date
+      }));
+  }
+
+  async getCertifiedBatches(buyerId: string): Promise<CollectionBatch[]> {
+     const configError = this.checkConfig();
+     if (configError) return [];
+
+     const { data } = await supabase.from('batches').select('*').eq('certified_by_user_id', buyerId);
+     if (!data) return [];
+     return data.map((b: any) => ({
+        id: b.id, collectorId: b.collector_id, recyclerId: b.recycler_id, weightKg: b.weight_kg,
+        plasticType: b.plastic_type, plaxGenerated: b.plax_generated, date: b.created_at,
+        status: b.status, nfeId: b.nfe_id, certifiedByUserId: b.certified_by_user_id, certificationDate: b.certification_date
+     }));
+  }
+
+  // --- Actions ---
+
+  async registerCollection(recyclerId: string, collectorId: string, weight: number, plasticType: PlasticType) {
+    const configError = this.checkConfig();
+    if (configError) return { success: false, message: configError };
+
+    const plaxAmount = weight * KG_TO_PLAX_RATE;
+
+    // 1. Create Batch
+    const { error: batchError } = await supabase.from('batches').insert({
+        collector_id: collectorId,
+        recycler_id: recyclerId,
+        weight_kg: weight,
+        plastic_type: plasticType,
+        plax_generated: plaxAmount,
+        status: 'RECEIVED'
+    });
+
+    if (batchError) return { success: false, message: batchError.message };
+
+    // 2. Update Balances (RPC is better, but doing direct update for MVP)
+    // Collector gets Plax
+    await this.updateBalance(collectorId, 'balance_plax', plaxAmount);
+    // Recycler gets Locked Plax
+    await this.updateBalance(recyclerId, 'locked_plax', plaxAmount);
+
+    // 3. Create Transaction
+    await supabase.from('transactions').insert({
+        type: 'COLLECTION',
+        amount_plax: plaxAmount,
+        description: `Coleta: ${weight}kg ${plasticType}`,
+        status: 'COMPLETED',
+        to_user_id: collectorId
+    });
+
     return { success: true, plaxGenerated: plaxAmount };
   }
 
-  // 2. Recycler emits NFe
-  emitNFe(recyclerId: string, transformerId: string, weightKg: number, manualNFeId: string) {
+  async emitNFe(recyclerId: string, transformerId: string, weightKg: number, manualNFeId: string) {
+    const configError = this.checkConfig();
+    if (configError) return { success: false, message: configError };
+
     const plaxToUnlock = weightKg * KG_TO_PLAX_RATE;
-    const recycler = this.users.find(u => u.id === recyclerId);
-    const transformer = this.users.find(u => u.id === transformerId);
+    const recycler = await this.getCurrentUser(recyclerId);
+    
+    if (!recycler) return { success: false, message: 'Reciclador não encontrado' };
+    if (recycler.lockedPlax < plaxToUnlock) return { success: false, message: `Saldo travado insuficiente.` };
 
-    // Validations
-    if (!recycler) return { success: false, message: 'Reciclador não encontrado.' };
-    if (!transformer) return { success: false, message: 'Transformador não encontrado.' };
-    if (!manualNFeId) return { success: false, message: 'Número da NFe é obrigatório.' };
-    if (recycler.lockedPlax < plaxToUnlock) return { success: false, message: `Saldo travado insuficiente. Necessário: ${plaxToUnlock} PLAX, Atual: ${recycler.lockedPlax} PLAX` };
-
-    // Find batches to process
-    const pendingBatches = this.batches.filter(b => b.recyclerId === recyclerId && b.status === 'RECEIVED');
-    const totalPendingWeight = pendingBatches.reduce((acc, b) => acc + b.weightKg, 0);
-
-    if (totalPendingWeight < weightKg) {
-        return { success: false, message: `Estoque físico insuficiente. Você tem ${totalPendingWeight}kg recebidos, mas tentou emitir nota para ${weightKg}kg.` };
-    }
-
-    // Process logic
-    recycler.lockedPlax -= plaxToUnlock;
-    recycler.balancePlax += plaxToUnlock;
-    transformer.balancePlax += plaxToUnlock; 
+    // Find batches
+    const { data: batches } = await supabase.from('batches').select('*')
+        .eq('recycler_id', recyclerId).eq('status', 'RECEIVED');
+    
+    if (!batches) return { success: false, message: 'Erro ao buscar lotes' };
 
     let remainingWeightToProcess = weightKg;
-    const nfeId = manualNFeId;
-
-    // Iterate through a copy to safely modify the original array
-    for (const batch of [...pendingBatches]) {
+    
+    // Process Batches in DB
+    for (const batch of batches) {
         if (remainingWeightToProcess <= 0.001) break;
 
-        if (batch.weightKg <= remainingWeightToProcess) {
-            // Consume full batch
-            batch.status = 'PROCESSED_NFE';
-            batch.nfeId = nfeId;
-            remainingWeightToProcess -= batch.weightKg;
+        if (batch.weight_kg <= remainingWeightToProcess) {
+            await supabase.from('batches').update({ status: 'PROCESSED_NFE', nfe_id: manualNFeId })
+                .eq('id', batch.id);
+            remainingWeightToProcess -= batch.weight_kg;
         } else {
-            // Split batch
             const usedWeight = remainingWeightToProcess;
-            const newProcessedBatch: CollectionBatch = {
-                ...batch,
-                id: Math.random().toString(36).substr(2, 9),
-                weightKg: usedWeight,
-                plaxGenerated: usedWeight * KG_TO_PLAX_RATE,
+            // Split: create processed one
+            await supabase.from('batches').insert({
+                collector_id: batch.collector_id,
+                recycler_id: batch.recycler_id,
+                weight_kg: usedWeight,
+                plastic_type: batch.plastic_type,
+                plax_generated: usedWeight * KG_TO_PLAX_RATE,
                 status: 'PROCESSED_NFE',
-                nfeId: nfeId
-            };
+                nfe_id: manualNFeId
+            });
+            // Reduce original
+            await supabase.from('batches').update({ 
+                weight_kg: batch.weight_kg - usedWeight,
+                plax_generated: (batch.weight_kg - usedWeight) * KG_TO_PLAX_RATE
+            }).eq('id', batch.id);
             
-            // Update remaining part of original batch
-            batch.weightKg -= usedWeight;
-            batch.plaxGenerated = batch.weightKg * KG_TO_PLAX_RATE;
-            // Original stays 'RECEIVED'
-
-            this.batches.push(newProcessedBatch);
             remainingWeightToProcess = 0;
         }
     }
 
-    this.transactions.unshift({
-      id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'NFE_RELEASE',
-      amountPlax: plaxToUnlock, description: `NFe emitida (${nfeId}): ${weightKg}kg`, status: 'COMPLETED', fromUserId: recyclerId, toUserId: transformerId
+    // Update Balances
+    await this.updateBalance(recyclerId, 'locked_plax', -plaxToUnlock);
+    await this.updateBalance(recyclerId, 'balance_plax', plaxToUnlock);
+    await this.updateBalance(transformerId, 'balance_plax', plaxToUnlock);
+
+    // Transaction
+    await supabase.from('transactions').insert({
+        type: 'NFE_RELEASE',
+        amount_plax: plaxToUnlock,
+        description: `NFe emitida (${manualNFeId}): ${weightKg}kg`,
+        status: 'COMPLETED',
+        from_user_id: recyclerId,
+        to_user_id: transformerId
     });
-    
-    return { success: true, message: 'NFe cadastrada com sucesso! Créditos liberados.' };
+
+    return { success: true, message: 'NFe processada com sucesso.' };
   }
 
-  // 3. ESG Buyer buys CERTIFIED LOTS
-  buyCertifiedLots(buyerId: string, amountBRL: number) {
-      const buyer = this.users.find(u => u.id === buyerId);
+  async buyCertifiedLots(buyerId: string, amountBRL: number) {
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
+
+      const buyer = await this.getCurrentUser(buyerId);
       if (!buyer || buyer.balanceBRL < amountBRL) return { success: false, message: 'Saldo insuficiente' };
 
-      // Find available batches
-      const availableBatches = this.batches.filter(b => b.status === 'PROCESSED_NFE');
-      if (availableBatches.length === 0) return { success: false, message: 'Não há lotes processados por NFe disponíveis no mercado. Aguarde um Reciclador emitir NFe.' };
+      const { data: availableBatches } = await supabase.from('batches').select('*').eq('status', 'PROCESSED_NFE');
+      if (!availableBatches || availableBatches.length === 0) return { success: false, message: 'Sem lotes disponíveis.' };
 
       let remainingMoney = amountBRL;
       let purchasedWeight = 0;
-      let batchesPurchased = 0;
 
-      // Use a copy to avoid iteration issues when modifying the array
-      for (const batch of [...availableBatches]) {
+      for (const batch of availableBatches) {
           if (remainingMoney <= 0.01) break; 
+          const batchCost = batch.weight_kg * ESG_CREDIT_PRICE_PER_KG;
 
-          const batchCost = batch.weightKg * ESG_CREDIT_PRICE_PER_KG;
-          
-          if (remainingMoney >= batchCost - 0.01) { // Tolerance for float comparison
-              // Buy full batch
-              remainingMoney -= batchCost;
-              batch.status = 'CERTIFIED_SOLD';
-              batch.certifiedByUserId = buyerId;
-              batch.certificationDate = new Date().toISOString();
-              purchasedWeight += batch.weightKg;
-              batchesPurchased++;
-          } else {
-              // Buy partial batch (split)
-              const weightToBuy = remainingMoney / ESG_CREDIT_PRICE_PER_KG;
-              
-              if (weightToBuy < 0.01) break;
-
-              // 1. Create the new sold batch
-              const newSoldBatch: CollectionBatch = {
-                  ...batch,
-                  id: Math.random().toString(36).substr(2, 9),
-                  weightKg: weightToBuy,
-                  plaxGenerated: weightToBuy * KG_TO_PLAX_RATE,
+          if (remainingMoney >= batchCost - 0.01) {
+              await supabase.from('batches').update({
                   status: 'CERTIFIED_SOLD',
-                  certifiedByUserId: buyerId,
-                  certificationDate: new Date().toISOString(),
-              };
-              
-              // 2. Update the existing batch to reflect remaining weight
-              batch.weightKg -= weightToBuy;
-              batch.plaxGenerated = batch.weightKg * KG_TO_PLAX_RATE;
-              // status stays PROCESSED_NFE
-
-              // 3. Add new sold batch to system
-              this.batches.push(newSoldBatch);
-              
-              purchasedWeight += weightToBuy;
-              remainingMoney = 0;
-              batchesPurchased++;
-              break; // Finished money
+                  certified_by_user_id: buyerId,
+                  certification_date: new Date().toISOString()
+              }).eq('id', batch.id);
+              purchasedWeight += batch.weight_kg;
+              remainingMoney -= batchCost;
+          } else {
+             continue; 
           }
       }
 
-      if (purchasedWeight === 0) return { success: false, message: 'Não foi possível processar a compra.' };
-
       const totalSpent = amountBRL - remainingMoney;
-      buyer.balanceBRL -= totalSpent;
+      if (totalSpent <= 0) return { success: false, message: 'Não foi possível comprar.' };
 
-      // Distribution Logic
-      // 15% Coletor (Reduced from 25%)
-      // 30% Reciclador (Increased from 25%)
-      // 25% Transformador (Maintained)
-      // 30% ESG Buyer Balance (Increased from 25%) for Reinvestment
-      
+      // Update Buyer Balance
+      await this.updateBalance(buyerId, 'balance_brl', -totalSpent);
+
+      // Distribution
       const collectorShare = totalSpent * 0.15;
       const recyclerShare = totalSpent * 0.30;
       const transformerShare = totalSpent * 0.25;
       const esgShare = totalSpent * 0.30;
 
-      this.distributeToRole(UserRole.COLLECTOR, collectorShare);
-      this.distributeToRole(UserRole.RECYCLER, recyclerShare);
-      this.distributeToRole(UserRole.TRANSFORMER, transformerShare);
-      
-      // Credit back to ESG User for reinvestment
-      buyer.balanceBRL += esgShare;
-      
-      this.transactions.unshift({
-        id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'ESG_PURCHASE',
-        amountBRL: totalSpent, description: `Compra de ${purchasedWeight.toFixed(2)}kg (Retorno para doação: R$ ${esgShare.toFixed(2)})`, status: 'COMPLETED', fromUserId: buyerId
+      await this.distributeToRole(UserRole.COLLECTOR, collectorShare);
+      await this.distributeToRole(UserRole.RECYCLER, recyclerShare);
+      await this.distributeToRole(UserRole.TRANSFORMER, transformerShare);
+      await this.updateBalance(buyerId, 'balance_brl', esgShare);
+
+      await supabase.from('transactions').insert({
+        type: 'ESG_PURCHASE',
+        amount_brl: totalSpent,
+        description: `Compra de ${purchasedWeight.toFixed(2)}kg`,
+        status: 'COMPLETED',
+        from_user_id: buyerId
       });
 
-      return { success: true, message: `Sucesso! Adquirido ${purchasedWeight.toFixed(2)}kg. R$ ${esgShare.toFixed(2)} retornaram para seu fundo de reinvestimento social.`, spent: totalSpent };
+      return { success: true, message: `Compra realizada. ${purchasedWeight}kg adquiridos.` };
   }
 
-  // 5. Reinvest Funds (Donation)
-  reinvest(userId: string, amount: number, institutionId: string) {
-      const user = this.users.find(u => u.id === userId);
+  async reinvest(userId: string, amount: number, institutionId: string) {
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
+
+      const user = await this.getCurrentUser(userId);
       const institution = INSTITUTIONS.find(i => i.id === institutionId);
-      const admin = this.users.find(u => u.role === UserRole.ADMIN);
       
-      if (!user || user.balanceBRL < amount) return { success: false, message: 'Saldo insuficiente para doação.' };
-      if (!institution) return { success: false, message: 'Instituição inválida.' };
+      if (!user || user.balanceBRL < amount) return { success: false, message: 'Saldo insuficiente.' };
 
-      user.balanceBRL -= amount;
+      await this.updateBalance(userId, 'balance_brl', -amount);
 
-      // Special Logic: If reinvesting in PlaxRec Acelera (i4), Admin gets 100%
       if (institutionId === 'i4') {
-         if (admin) admin.balanceBRL += amount;
-         
-         this.transactions.unshift({
-            id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'TRANSFER',
-            amountBRL: amount, description: `Reinvestimento Acelera PlaxRec`, status: 'COMPLETED', fromUserId: userId
-        });
-        return { success: true, message: `Reinvestimento de R$ ${amount.toFixed(2)} realizado com sucesso na PlaxRec.` };
+          // Send to Admin
+          await this.distributeToRole(UserRole.ADMIN, amount);
+      } else {
+          // External + 2% Fee
+          const fee = amount * 0.02;
+          await this.distributeToRole(UserRole.ADMIN, fee);
       }
-      
-      // Standard Logic for External NGOs: Admin gets 2% fee, rest goes to external entity
-      const adminFee = amount * 0.02;
-      if(admin) admin.balanceBRL += adminFee;
 
-      this.transactions.unshift({
-          id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'TRANSFER',
-          amountBRL: amount, description: `Doação para: ${institution.name}`, status: 'COMPLETED', fromUserId: userId
+      await supabase.from('transactions').insert({
+          type: 'TRANSFER',
+          amount_brl: amount,
+          description: `Doação para: ${institution?.name}`,
+          status: 'COMPLETED',
+          from_user_id: userId
       });
 
-      return { success: true, message: `Doação de R$ ${amount.toFixed(2)} realizada com sucesso para ${institution.name}.` };
+      return { success: true, message: 'Doação realizada.' };
   }
 
-  private distributeToRole(role: UserRole, amount: number) {
-    const target = this.users.find(u => u.role === role);
-    if (target) target.balanceBRL += amount;
+  async withdraw(userId: string, amount: number, isPlax: boolean) {
+      const configError = this.checkConfig();
+      if (configError) return { success: false, message: configError };
+
+      const user = await this.getCurrentUser(userId);
+      if(!user) return { success: false, message: 'Erro usuário' };
+
+      if (isPlax) {
+          if (user.balancePlax < amount) return { success: false, message: 'Saldo insuficiente' };
+          const valBRL = amount * PLAX_TO_BRL_RATE;
+          const fee = valBRL * 0.02;
+          const net = valBRL - fee;
+
+          await this.updateBalance(userId, 'balance_plax', -amount);
+          await this.updateBalance(userId, 'balance_brl', net);
+          await this.distributeToRole(UserRole.ADMIN, fee); // Admin gets fee in BRL
+
+          await supabase.from('transactions').insert({
+            type: 'WITHDRAWAL',
+            amount_plax: amount,
+            amount_brl: net,
+            description: 'Conversão Plax -> Real',
+            status: 'COMPLETED',
+            from_user_id: userId
+          });
+
+      } else {
+          if (user.balanceBRL < amount) return { success: false, message: 'Saldo insuficiente' };
+          const fee = amount * 0.02;
+          const net = amount - fee;
+          
+          await this.updateBalance(userId, 'balance_brl', -amount);
+          if (user.role !== UserRole.ADMIN) {
+              await this.distributeToRole(UserRole.ADMIN, fee);
+          }
+
+          await supabase.from('transactions').insert({
+            type: 'WITHDRAWAL',
+            amount_brl: net,
+            description: 'Saque Bancário',
+            status: 'COMPLETED',
+            from_user_id: userId
+          });
+      }
+      return { success: true, message: 'Saque registrado.' };
   }
 
-  // 4. Withdrawal
-  withdraw(userId: string, amount: number, isPlax: boolean) {
-    const user = this.users.find(u => u.id === userId);
-    if(!user) return { success: false, message: 'Usuário não encontrado' };
+  // --- Helpers ---
 
-    // Admin Special Rule: Max 30% of accumulated balance
-    if (user.role === UserRole.ADMIN) {
-        if (!isPlax) { // Admin withdraws BRL usually
-            const maxWithdraw = user.balanceBRL * 0.30;
-            if (amount > maxWithdraw) {
-                return { success: false, message: `Admin limitado a sacar 30% do saldo (Max: R$ ${maxWithdraw.toFixed(2)}) para reinvestimento obrigatório.` };
-            }
-        }
-    }
+  private async updateBalance(userId: string, field: 'balance_plax' | 'balance_brl' | 'locked_plax', amount: number) {
+      // Need to fetch current first to add (Concurrency issue in MVP, in Prod use RPC "increment")
+      const user = await this.getCurrentUser(userId);
+      if (!user) return;
 
-    if (isPlax) {
-        if (user.balancePlax < amount) return { success: false, message: 'Saldo Plax insuficiente' };
-        // Convert Plax to Real
-        const valueBRL = amount * PLAX_TO_BRL_RATE;
-        const adminFee = valueBRL * 0.02;
-        const finalValue = valueBRL - adminFee;
-        
-        user.balancePlax -= amount;
-        user.balanceBRL += finalValue; // Move to Wallet BRL (or external bank in real app)
-        
-        // Fee to Admin
-        const admin = this.users.find(u => u.role === UserRole.ADMIN);
-        if(admin) admin.balanceBRL += adminFee;
+      const mapping = {
+          'balance_plax': user.balancePlax,
+          'balance_brl': user.balanceBRL,
+          'locked_plax': user.lockedPlax
+      };
+      
+      const newVal = mapping[field] + amount;
+      
+      await supabase.from('profiles').update({ [field]: newVal }).eq('id', userId);
+  }
 
-        this.transactions.unshift({
-            id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'WITHDRAWAL',
-            amountPlax: amount, amountBRL: finalValue, description: `Conversão Plax -> Real (Taxa 2%)`, status: 'COMPLETED', fromUserId: userId
-        });
-    } else {
-        // Direct BRL withdrawal (Bank Transfer)
-        if (user.balanceBRL < amount) return { success: false, message: 'Saldo R$ insuficiente' };
-        
-        const adminFee = amount * 0.02;
-        const finalValue = amount - adminFee;
-
-        user.balanceBRL -= amount;
-        
-        // Fee to Admin (if not admin himself)
-        if (user.role !== UserRole.ADMIN) {
-            const admin = this.users.find(u => u.role === UserRole.ADMIN);
-            if(admin) admin.balanceBRL += adminFee;
-        }
-
-        this.transactions.unshift({
-            id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), type: 'WITHDRAWAL',
-            amountBRL: finalValue, description: `Saque Bancário (Taxa 2%)`, status: 'COMPLETED', fromUserId: userId
-        });
-    }
-
-    return { success: true, message: 'Saque realizado com sucesso.' };
+  private async distributeToRole(role: UserRole, amount: number) {
+      // Find first user of role (Simplification)
+      const { data } = await supabase.from('profiles').select('id, balance_brl').eq('role', role).limit(1);
+      if (data && data.length > 0) {
+          const u = data[0];
+          await supabase.from('profiles').update({ balance_brl: u.balance_brl + amount }).eq('id', u.id);
+      }
   }
 }
 
