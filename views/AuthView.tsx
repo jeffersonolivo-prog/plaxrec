@@ -50,22 +50,34 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { user, error } = await plaxService.login(loginEmail, loginPass);
-    setLoading(false);
-    
-    if (user) {
-      onLogin(user);
-    } else {
-      handleAuthError(error);
+    try {
+        const { user, error } = await plaxService.login(loginEmail, loginPass);
+        
+        if (user) {
+          onLogin(user);
+        } else {
+          handleAuthError(error);
+        }
+    } catch (err: any) {
+        handleAuthError(err.message || "Erro inesperado no login.");
+    } finally {
+        setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
       setLoading(true);
-      const { error } = await plaxService.loginWithGoogle();
-      if (error) {
+      try {
+          const { error } = await plaxService.loginWithGoogle();
+          if (error) {
+              handleAuthError(error);
+          }
+      } catch (err: any) {
+          handleAuthError(err.message);
+      } finally {
+          // Nota: Google login redireciona a página, então o loading false pode não ser visível se der sucesso, 
+          // mas é importante caso falhe antes do redirect.
           setLoading(false);
-          handleAuthError(error);
       }
   };
 
@@ -74,18 +86,24 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     if (!regName || !regEmail || !regPass) return;
     
     setLoading(true);
-    const { user, error } = await plaxService.register(regName, regEmail, regPass);
-    setLoading(false);
-    
-    if (user) {
-      onLogin(user);
-    } else {
-      handleAuthError(error);
+    try {
+        const { user, error } = await plaxService.register(regName, regEmail, regPass);
+        
+        if (user) {
+          onLogin(user);
+        } else {
+          handleAuthError(error);
+        }
+    } catch (err: any) {
+        handleAuthError(err.message || "Erro ao registrar.");
+    } finally {
+        setLoading(false);
     }
   };
 
   const handleAuthError = (error?: string) => {
       if (!error) return;
+      console.error("Auth Error Debug:", error);
       
       if (error.includes('Supabase não configurado') || error.includes('placeholder')) {
           alert('ERRO DE CONFIGURAÇÃO:\n\nVocê precisa editar o arquivo "services/supabaseClient.ts" e colocar suas chaves do Supabase nas variáveis SUPABASE_URL e SUPABASE_ANON_KEY.');
@@ -93,6 +111,8 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
           alert('⚠️ AÇÃO NECESSÁRIA NO SUPABASE ⚠️\n\nErro: Email não confirmado.\n\nSolução: Vá no painel do Supabase -> Authentication -> Providers -> Email -> Desmarque "Confirm email".');
       } else if (error.includes('Invalid login credentials')) {
           alert('Email ou senha incorretos.');
+      } else if (error.includes('fetch')) {
+          alert('Erro de conexão. Verifique sua internet ou a configuração do Supabase.');
       } else {
           alert(`Erro: ${error}`);
       }

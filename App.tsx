@@ -46,9 +46,11 @@ const App: React.FC = () => {
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
-             const user = await plaxService.getCurrentUser(session.user.id);
-             if (user && mounted) setCurrentUser(user);
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+             if (session?.user) {
+                const user = await plaxService.getCurrentUser(session.user.id);
+                if (user && mounted) setCurrentUser(user);
+             }
         } else if (event === 'SIGNED_OUT') {
             if (mounted) setCurrentUser(null);
         }
@@ -72,12 +74,21 @@ const App: React.FC = () => {
   const handleRoleSelection = async (role: UserRole) => {
       if (!currentUser) return;
       
-      const res = await plaxService.updateProfileRole(currentUser.id, role);
-      if (res?.success) {
-          const updatedUser = { ...currentUser, role };
-          setCurrentUser(updatedUser);
-      } else {
-          alert("Erro ao atualizar perfil: " + (res?.message || "Erro desconhecido"));
+      try {
+          // Atualiza no banco
+          const res = await plaxService.updateProfileRole(currentUser.id, role);
+          
+          if (res?.success) {
+              // IMPORTANTE: Busca os dados frescos do banco para garantir que a UI
+              // renderize com o estado correto, evitando crashes.
+              await handleRefresh();
+              setCurrentView('DASHBOARD');
+          } else {
+              alert("Erro ao salvar perfil: " + (res?.message || "Tente novamente."));
+          }
+      } catch (error) {
+          console.error("Critical error updating role:", error);
+          alert("Ocorreu um erro ao definir seu perfil. Por favor, tente recarregar a página.");
       }
   };
 

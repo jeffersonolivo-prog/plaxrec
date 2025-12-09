@@ -48,6 +48,11 @@ class PlaxService {
             };
         }
 
+        // Se deu erro e não é "No rows found" (código PGRST116), loga o erro real
+        if (error && error.code !== 'PGRST116') {
+            console.error("Erro ao buscar perfil (possível bloqueio RLS):", error);
+        }
+
         // 2. Se não encontrou perfil (ex: primeiro login), tenta criar com UPSERT
         const { data: authData } = await supabase.auth.getUser();
         if (authData.user && authData.user.id === authUserId) {
@@ -66,8 +71,8 @@ class PlaxService {
             
             if (upsertError) {
                 console.error("Erro ao garantir perfil:", upsertError);
-                // Mesmo com erro no insert, tentamos retornar o objeto para não travar a UI
-                return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
+                // Mesmo com erro, tentamos retornar o objeto para a UI, assumindo que o login auth funcionou
+                // Isso evita o 'loop' de login
             }
 
             return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
@@ -94,6 +99,9 @@ class PlaxService {
     if (!authData.user) return { user: null, error: 'Erro desconhecido na autenticação.' };
 
     const user = await this.getCurrentUser(authData.user.id);
+    // Se getCurrentUser falhar silenciosamente, retorna erro explícito
+    if (!user) return { user: null, error: 'Falha ao recuperar dados do perfil. Tente novamente.' };
+    
     return { user };
   }
 
@@ -112,8 +120,6 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
     
-    // NOTA: Removemos 'role' dos metadados para evitar erros de Constraint/Trigger no banco de dados.
-    // Criaremos o perfil manualmente logo abaixo.
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email, password, options: { data: { name } } 
     });
@@ -141,10 +147,11 @@ class PlaxService {
       const configError = this.checkConfig();
       if (configError) return { success: false, message: configError };
       try {
-          await supabase.from('profiles').update({ role: role }).eq('id', userId);
+          const { error } = await supabase.from('profiles').update({ role: role }).eq('id', userId);
+          if (error) throw error;
           return { success: true };
       } catch (e: any) {
-          return { success: false, message: e.message };
+          return { success: false, message: e.message || 'Erro ao atualizar papel.' };
       }
   }
 
