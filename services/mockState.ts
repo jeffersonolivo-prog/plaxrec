@@ -48,7 +48,7 @@ class PlaxService {
             };
         }
 
-        // 2. Se não encontrou perfil, mas o Auth existe (ex: primeiro login após registro), cria o perfil GUEST
+        // 2. Se não encontrou perfil (ex: primeiro login), tenta criar com UPSERT
         const { data: authData } = await supabase.auth.getUser();
         if (authData.user && authData.user.id === authUserId) {
              const newProfileData = {
@@ -61,12 +61,13 @@ class PlaxService {
                 locked_plax: 0,
             };
             
-            // Tenta inserir
-            const { error: insertError } = await supabase.from('profiles').insert(newProfileData);
+            // Usa UPSERT em vez de INSERT para evitar erro de "Duplicate Key" se o trigger do banco já tiver criado
+            const { error: upsertError } = await supabase.from('profiles').upsert(newProfileData);
             
-            if (insertError) {
-                console.error("Erro ao criar perfil inicial:", insertError);
-                return null;
+            if (upsertError) {
+                console.error("Erro ao garantir perfil:", upsertError);
+                // Mesmo com erro no insert, tentamos retornar o objeto para não travar a UI
+                return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
             }
 
             return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
@@ -111,13 +112,28 @@ class PlaxService {
     const configError = this.checkConfig();
     if (configError) return { user: null, error: configError };
     
+    // NOTA: Removemos 'role' dos metadados para evitar erros de Constraint/Trigger no banco de dados.
+    // Criaremos o perfil manualmente logo abaixo.
     const { data: authData, error: authError } = await supabase.auth.signUp({
-        email, password, options: { data: { name, role: UserRole.GUEST } }
+        email, password, options: { data: { name } } 
     });
 
     if (authError) return { user: null, error: authError.message };
-    if (authData.user && !authData.session) return { user: null, error: 'Verifique seu e-mail.' };
+    if (authData.user && !authData.session) return { user: null, error: 'Verifique seu e-mail para confirmar o cadastro.' };
     
+    // Força a criação do perfil na tabela profiles para garantir que existe
+    if (authData.user) {
+        await supabase.from('profiles').upsert({
+            id: authData.user.id,
+            name: name,
+            email: email,
+            role: UserRole.GUEST,
+            balance_plax: 0,
+            balance_brl: 0,
+            locked_plax: 0
+        });
+    }
+
     return { user: { id: authData.user!.id, name, email, role: UserRole.GUEST, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } };
   }
 
