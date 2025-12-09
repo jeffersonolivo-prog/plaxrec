@@ -447,9 +447,40 @@ class PlaxService {
   }
 
   private async updateBalance(userId: string, field: string, amount: number) {
+      // 1. Tenta encontrar o usuário para atualizar
       const { data } = await supabase.from('profiles').select(field).eq('id', userId).single();
+      
       if (data) {
+          // 2. Se existe, apenas atualiza
           await supabase.from('profiles').update({ [field]: (data[field] || 0) + amount }).eq('id', userId);
+      } else {
+          // 3. Se NÃO existe (é uma Persona Virtual usada pela primeira vez na transação)
+          // Precisamos criá-la no banco para receber o saldo
+          console.log(`Criando perfil para persona destino: ${userId}`);
+          
+          const baseId = userId.includes('_') ? userId.split('_')[0] : userId;
+          
+          // Tenta pegar dados do "pai" (usuário real) para copiar nome/email
+          const { data: parent } = await supabase.from('profiles').select('*').eq('id', baseId).single();
+          
+          const roleSuffix = userId.includes('_') ? userId.split('_')[1] : 'GUEST';
+          
+          const newProfile = {
+              id: userId,
+              name: parent ? `${parent.name} (${roleSuffix})` : `User ${roleSuffix}`,
+              email: parent ? parent.email : '',
+              role: roleSuffix,
+              // Define o saldo inicial já com o valor da transação
+              balance_plax: field === 'balance_plax' ? amount : 0,
+              balance_brl: field === 'balance_brl' ? amount : 0,
+              locked_plax: field === 'locked_plax' ? amount : 0,
+              avatar_url: parent ? parent.avatar_url : ''
+          };
+
+          const { error } = await supabase.from('profiles').insert(newProfile);
+          if (error) {
+              console.error("Falha ao criar persona no updateBalance:", error);
+          }
       }
   }
 
