@@ -13,7 +13,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
   const [loading, setLoading] = useState(false);
   
   // Profile State
-  const [name, setName] = useState(user.name.split(' (')[0]); // Remove sufixo da persona se houver
+  const [name, setName] = useState(user.name.split(' (')[0]); 
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '');
   
   // Password State
@@ -44,33 +44,36 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
   };
 
   const handleChangeRole = async () => {
-      // Verifica se é o mesmo papel atual
       if (selectedRole === user.role) return;
       
       const confirmChange = window.confirm(
           `Trocar para a Persona: ${selectedRole}?\n\n` +
-          "Isso criará/carregará uma carteira isolada para este perfil. " +
-          "Seus dados do perfil anterior permanecerão salvos."
+          "O sistema alternará para a carteira virtual deste perfil imediatamente."
       );
       if (!confirmChange) return;
 
       setLoading(true);
       
-      // Usa a nova lógica de Persona Virtual
+      // 1. Define a nova persona no serviço (Local Storage)
       plaxService.setDemoPersona(selectedRole);
       
-      // Delay para garantir que o serviço atualizou o storage/estado
-      setTimeout(() => {
-          setLoading(false);
-          // Recarrega a aplicação inteira para garantir que todos os componentes peguem o novo ID Virtual
-          window.location.reload();
-      }, 1000);
+      // 2. Aguarda um momento breve para garantir a persistência
+      await new Promise(r => setTimeout(r, 300));
+
+      // 3. Solicita ao App que recarregue o usuário (isso vai ler o novo localStorage)
+      await onUpdateUser();
+
+      setLoading(false);
+      alert(`Alternado para ${selectedRole} com sucesso!`);
   };
 
-  const resetDemo = () => {
-      if(window.confirm("Isso irá desconectar as personas virtuais e voltar para sua conta real original.")) {
+  const resetDemo = async () => {
+      if(window.confirm("Voltar para sua conta real original?")) {
+          setLoading(true);
           plaxService.setDemoPersona(null);
-          window.location.reload();
+          await new Promise(r => setTimeout(r, 300));
+          await onUpdateUser();
+          setLoading(false);
       }
   }
 
@@ -204,8 +207,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ user, refresh, onUpdateUser
              
              {isVirtual && (
                  <div className="mt-6 pt-6 border-t border-indigo-100 flex justify-center">
-                     <button onClick={resetDemo} className="text-xs text-indigo-400 hover:text-indigo-600 underline">
-                         Sair do Modo Persona e Voltar ao Usuário Real
+                     <button onClick={resetDemo} disabled={loading} className="text-xs text-indigo-400 hover:text-indigo-600 underline">
+                         {loading ? 'Processando...' : 'Sair do Modo Persona e Voltar ao Usuário Real'}
                      </button>
                  </div>
              )}

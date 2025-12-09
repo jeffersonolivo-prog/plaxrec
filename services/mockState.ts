@@ -10,13 +10,10 @@ export const INSTITUTIONS = [
 
 class PlaxService {
   private activePersonaRole: UserRole | null = null;
-  private realAuthId: string | null = null;
 
-  // Helper to check configuration
   private checkConfig() {
       const url = SUPABASE_URL;
       const key = SUPABASE_ANON_KEY;
-
       if (!url || url.includes('COLE_SUA') || !key || key.includes('COLE_SUA')) {
           return "Supabase não configurado. Edite o arquivo services/supabaseClient.ts com suas chaves reais.";
       }
@@ -41,18 +38,20 @@ class PlaxService {
   }
 
   private getEffectiveUserId(authUserId: string): string {
-      this.realAuthId = authUserId;
+      // Garante que o ID base não seja já um ID virtual, prevenindo recursão
+      const baseId = authUserId.includes('_') ? authUserId.split('_')[0] : authUserId;
       const role = this.getDemoPersona();
       
       if (role && role !== UserRole.GUEST) {
-          return `${authUserId}_${role}`;
+          return `${baseId}_${role}`;
       }
-      return authUserId;
+      return baseId;
   }
 
   // --- Auth & User ---
 
   async getCurrentUser(authUserId: string): Promise<User | null> {
+    if (!authUserId) return null;
     const configError = this.checkConfig();
     if (configError) { console.error(configError); return null; }
 
@@ -67,7 +66,7 @@ class PlaxService {
             .eq('id', effectiveId)
             .single();
         
-        // Se encontrou, retorna
+        // Se encontrou e não deu erro (incluindo RLS), retorna
         if (data && !error) {
             return {
                 id: data.id,
@@ -81,47 +80,56 @@ class PlaxService {
             };
         }
 
-        // 2. Se não encontrou e estamos em MODO DEMO, tenta criar
-        if (currentRole && !data) {
-            console.log(`Tentando criar persona virtual: ${effectiveId}`);
+        // 2. Se não encontrou e estamos em MODO DEMO, cria objeto VIRTUAL
+        if (currentRole) {
+            console.log(`Usando persona virtual na memória: ${effectiveId}`);
             
-            // Busca dados do usuário real para clonar nome/email base
-            const { data: realProfile } = await supabase.from('profiles').select('*').eq('id', authUserId).single();
-            const baseName = realProfile?.name || 'Usuário Demo';
-            const baseEmail = realProfile?.email || 'demo@plaxrec.com';
+            // Tenta pegar nome do usuário real, se falhar usa genérico
+            let baseName = 'Usuário Demo';
+            let baseEmail = 'demo@plaxrec.com';
+            let avatar = '';
+
+            // Tenta ler o user real (pode falhar por RLS dependendo da config, mas geralmente user pode ler seu próprio profile)
+            // Usa o ID base real para essa consulta
+            const baseId = authUserId.split('_')[0];
+            const { data: realProfile } = await supabase.from('profiles').select('*').eq('id', baseId).single();
             
-            const newPersonaData = {
+            if (realProfile) {
+                baseName = realProfile.name;
+                baseEmail = realProfile.email;
+                avatar = realProfile.avatar_url;
+            }
+
+            const newPersona: User = {
                 id: effectiveId,
                 name: `${baseName} (${currentRole})`,
                 email: baseEmail,
                 role: currentRole,
-                balance_plax: 0,
-                balance_brl: 0,
-                locked_plax: 0,
-                avatar_url: realProfile?.avatar_url || ''
-            };
-
-            const { error: insertError } = await supabase.from('profiles').insert(newPersonaData);
-            
-            // FALLBACK CRÍTICO: Se o banco recusar (insertError), retornamos o objeto em memória
-            // Isso garante que o app não trave se o usuário não rodou o SQL de FK constraint
-            if (insertError) {
-                console.warn("Falha ao persistir persona no DB (usando modo volátil):", insertError.message);
-            }
-
-            return {
-                id: effectiveId,
-                name: newPersonaData.name,
-                email: newPersonaData.email,
-                role: currentRole,
                 balancePlax: 0,
                 balanceBRL: 0,
                 lockedPlax: 0,
-                avatarUrl: newPersonaData.avatar_url
+                avatarUrl: avatar
             };
+
+            // Tenta salvar no banco apenas para persistência futura, mas não bloqueia se falhar
+            // (Isso corrige o problema do usuário ser desconectado se o DB bloquear a criação)
+            supabase.from('profiles').insert({
+                id: effectiveId,
+                name: newPersona.name,
+                email: newPersona.email,
+                role: newPersona.role,
+                balance_plax: 0,
+                balance_brl: 0,
+                locked_plax: 0,
+                avatar_url: avatar
+            }).then(({ error }) => {
+                if(error) console.warn("Modo Volátil: Persistência no banco falhou (provavelmente RLS/FK), mas o app continuará funcionando.", error.message);
+            });
+
+            return newPersona;
         }
 
-        // 3. Fallback para usuário original (primeiro acesso real)
+        // 3. Fallback para usuário original (primeiro acesso real ou erro de leitura)
         const { data: authData } = await supabase.auth.getUser();
         if (authData.user && authData.user.id === authUserId) {
              const newProfileData = {
@@ -133,7 +141,6 @@ class PlaxService {
                 balance_brl: 0,
                 locked_plax: 0,
             };
-            // Tenta inserir, se falhar, retorna o objeto mesmo assim
             await supabase.from('profiles').insert(newProfileData);
             return { ...newProfileData, balancePlax: 0, balanceBRL: 0, lockedPlax: 0 } as User;
         }
